@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+
+releves_klaxo3.csv
+releves_klaxo3.csv.tmp
+
+outputs/*.tmp
+outputs/*.partial
+outputs/.matplotlib/
