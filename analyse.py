@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import os
+import re
 import time
 import urllib.error
 import urllib.request
@@ -15,6 +16,7 @@ os.environ.setdefault("MPLCONFIGDIR", str(OUTPUT_DIR / ".matplotlib"))
 
 import matplotlib.pyplot as plt
 import pandas as pd
+import torch
 
 
 DATA_URLS = [
@@ -341,6 +343,128 @@ def compute_phase1(df: pd.DataFrame) -> dict[str, object]:
     }
 
 
+def tokenize(text: str) -> list[str]:
+    return re.findall(r"[a-z0-9]+", text.lower())
+
+
+def compute_phase2(df: pd.DataFrame) -> dict[str, object]:
+    torch.manual_seed(7)
+    candidates = df[
+        df["comments"].astype(str).str.strip().ne("")
+        & df["shape"].astype(str).str.strip().ne("")
+    ].copy()
+    candidates["source_index"] = candidates.index
+    candidates["shape_key"] = candidates["shape"].astype(str).str.strip().str.lower()
+    shape_order = candidates["shape_key"].value_counts().sort_values(ascending=False).index[:8]
+    examples = (
+        candidates[candidates["shape_key"].isin(shape_order)]
+        .sort_values(["shape_key", "observation_dt", "source_index"])
+        .groupby("shape_key", sort=True)
+        .head(1)
+        .sort_values("source_index")
+        .reset_index(drop=True)
+    )
+
+    texts = examples["comments"].astype(str).tolist()
+    shapes = examples["shape_key"].tolist()
+    vocab = sorted({token for text in texts for token in tokenize(text)})
+    token_to_idx = {token: i for i, token in enumerate(vocab)}
+    shape_to_id = {shape: i for i, shape in enumerate(sorted(set(shapes)))}
+    id_to_shape = {i: shape for shape, i in shape_to_id.items()}
+
+    x = torch.zeros((len(texts), len(vocab)), dtype=torch.float32)
+    for row_idx, text in enumerate(texts):
+        for token in tokenize(text):
+            x[row_idx, token_to_idx[token]] += 1.0
+    y = torch.tensor([shape_to_id[shape] for shape in shapes], dtype=torch.long)
+
+    model = torch.nn.Sequential(
+        torch.nn.Linear(x.shape[1], 16),
+        torch.nn.ReLU(),
+        torch.nn.Linear(16, len(shape_to_id)),
+    )
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.05)
+    loss_fn = torch.nn.CrossEntropyLoss()
+    losses: list[float] = []
+
+    with torch.no_grad():
+        initial_loss = float(loss_fn(model(x), y).item())
+
+    iterations = 0
+    for epoch in range(1, 5001):
+        optimizer.zero_grad()
+        logits = model(x)
+        loss = loss_fn(logits, y)
+        loss.backward()
+        optimizer.step()
+        iterations = epoch
+        losses.append(float(loss.item()))
+
+        with torch.no_grad():
+            predictions = model(x).argmax(dim=1)
+            correct = int((predictions == y).sum().item())
+        if correct == len(y) and losses[-1] < 0.02:
+            break
+
+    with torch.no_grad():
+        final_logits = model(x)
+        final_loss = float(loss_fn(final_logits, y).item())
+        predictions = final_logits.argmax(dim=1)
+        correct = int((predictions == y).sum().item())
+
+    plt.figure(figsize=(8, 4.5))
+    plt.plot(range(1, len(losses) + 1), losses)
+    plt.title("Phase 2 - Loss overfit sur 8 releves")
+    plt.xlabel("Iteration")
+    plt.ylabel("Loss")
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    loss_path = OUTPUT_DIR / "phase2_overfit_loss.png"
+    plt.savefig(loss_path, dpi=160)
+    plt.close()
+
+    assert correct == 8, f"Phase 2 echouee: {correct}/8 predictions correctes"
+
+    return {
+        "examples": examples,
+        "vocab_size": len(vocab),
+        "shape_to_id": shape_to_id,
+        "id_to_shape": id_to_shape,
+        "predictions": [id_to_shape[int(pred)] for pred in predictions],
+        "correct": correct,
+        "iterations": iterations,
+        "initial_loss": initial_loss,
+        "final_loss": final_loss,
+        "loss_path": loss_path,
+        "optimizer": "Adam",
+        "learning_rate": 0.05,
+    }
+
+
+def print_phase2(result: dict[str, object]) -> None:
+    examples = result["examples"]
+    predictions = result["predictions"]
+
+    print("\n=== PHASE 2 - TEST D'ACCEPTATION SUR 8 RELEVES ===")
+    print("Exemples retenus:")
+    for i, row in examples.iterrows():
+        comment = " ".join(str(row["comments"]).split())[:90]
+        print(f"- index {row['source_index']} | shape={row['shape_key']} | {comment}")
+
+    print("Classes presentes:", ", ".join(result["shape_to_id"].keys()))
+    print(f"Vocabulaire: {result['vocab_size']} mots")
+    print("\nPredictions finales:")
+    print("exemple | shape reelle | shape predite | correct ?")
+    for i, row in examples.iterrows():
+        predicted = predictions[i]
+        actual = row["shape_key"]
+        print(f"{i + 1} | {actual} | {predicted} | {'oui' if predicted == actual else 'non'}")
+    print(f"Accuracy sur les 8 exemples: {result['correct']}/8 = 100 %")
+    print(f"Nombre d'iterations necessaires: {result['iterations']}")
+    print(f"Loss initiale: {result['initial_loss']:.4f} | Loss finale: {result['final_loss']:.4f}")
+    print(f"Courbe de loss: {result['loss_path']}")
+
+
 def main() -> None:
     download_dataset()
     raw_df, load_report = load_dataset()
@@ -348,12 +472,15 @@ def main() -> None:
     full = compute_phase0(df, None, None)
     selected = compute_phase0(df, 1990, 2014)
     compute_phase1(selected["df"])
+    phase2 = compute_phase2(df)
 
     save_outputs(selected)
     print_phase0(load_report, full, selected)
+    print_phase2(phase2)
     print("\nSorties generees:")
     print(f"- {OUTPUT_DIR / 'phase0_top10_journees.csv'}")
     print(f"- {OUTPUT_DIR / 'phase0_volume_annuel.png'}")
+    print(f"- {OUTPUT_DIR / 'phase2_overfit_loss.png'}")
 
 
 if __name__ == "__main__":

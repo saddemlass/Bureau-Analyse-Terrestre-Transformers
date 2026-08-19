@@ -152,3 +152,25 @@ ENTREE : le texte `comments` ecrit par le temoin.
 SORTIE : la forme `shape` observee.
 
 "A partir du temoignage ecrit par un temoin, predire la forme de l'objet qu'il decrit."
+
+## Phase 2 — Test d'acceptation : mémoriser 8 relevés
+
+Cette phase fait volontairement de l'overfit. Le but est de verifier que toute la chaine fonctionne sur un cas minuscule : texte, representation numerique, tenseur PyTorch, labels, loss, optimisation et prediction.
+
+Ce test ne mesure absolument pas la generalisation. Il ne dit pas si le modele saura reconnaitre correctement de nouveaux temoignages. Il dit seulement qu'un petit reseau peut memoriser huit exemples reels quand toute la plomberie d'apprentissage est coherente.
+
+Les huit releves sont choisis de maniere deterministe dans le dataset deja charge, avec `comments` non vide et `shape` non vide. J'utilise une tokenisation simple en lowercase, puis un bag-of-words de comptage. Le vocabulaire est construit uniquement sur ces huit commentaires. Il contient 98 mots.
+
+Les classes presentes sont : `circle`, `disk`, `fireball`, `light`, `other`, `sphere`, `triangle`, `unknown`.
+
+Le modele PyTorch est volontairement petit :
+
+- `Linear(input_dim, 16)`
+- `ReLU`
+- `Linear(16, n_classes)`
+
+L'optimizer est Adam, avec un learning rate de 0.05. La loss est `CrossEntropyLoss`.
+
+Le modele atteint 8/8 en 13 iterations. La loss passe de 2.1124 au depart a 0.0049 a la fin. La courbe de loss est enregistree dans `outputs/phase2_overfit_loss.png`.
+
+Conclusion : si un petit reseau ne peut pas memoriser huit exemples, il existe probablement un probleme dans la representation, les labels, la loss, l'optimisation ou la chaine d'entrainement.
