@@ -174,3 +174,67 @@ L'optimizer est Adam, avec un learning rate de 0.05. La loss est `CrossEntropyLo
 Le modele atteint 8/8 en 13 iterations. La loss passe de 2.1124 au depart a 0.0049 a la fin. La courbe de loss est enregistree dans `outputs/phase2_overfit_loss.png`.
 
 Conclusion : si un petit reseau ne peut pas memoriser huit exemples, il existe probablement un probleme dans la representation, les labels, la loss, l'optimisation ou la chaine d'entrainement.
+
+## Phase 3 - Battre le service statistique
+
+Regle finale `shape` : les lignes sans `shape` restent dans le dataset general mais sont exclues de cette tache supervisee. Notre dataset charge compte 3118 `shape` manquantes : 2922 dans les lignes CSV directement valides, plus 196 dans les lignes malformees reparees. `unknown` et `other` sont retires car ce sont des categories fourre-tout. Les doublons evidents sont fusionnes : `round` vers `circle`, `changed` vers `changing`. Les 6 classes ayant moins de 10 exemples apres nettoyage sont exclues, car elles ne representent que 14 releves et sont trop petites pour etre reparties proprement entre train, validation et test. Aucun sous-echantillonnage artificiel par classe n'est applique.
+
+- lignes initiales : 88875
+- shape manquantes : 3118
+- unknown : 6319
+- other : 6247
+- lignes/classes avant filtre <10 : 73183 / 25
+- classes <10 retirees : {'delta': 8, 'crescent': 2, 'pyramid': 1, 'flare': 1, 'hexagon': 1, 'dome': 1}
+- lignes retirees car classe trop rare : 14
+- lignes gardees : 73169
+- nombre final de classes : 19
+- classes finales : changing, chevron, cigar, circle, cone, cross, cylinder, diamond, disk, egg, fireball, flash, formation, light, oval, rectangle, sphere, teardrop, triangle
+- split : train 51218, validation 10975, test 10976
+
+Le vocabulaire du reseau est construit uniquement sur train. Exemple de passage numerique :
+
+- texte brut : `saw a formation of three lights hovering over a cliff with a beam from the largest light`
+- tokens : `['saw', 'a', 'formation', 'of', 'three', 'lights', 'hovering', 'over', 'a', 'cliff', 'with', 'a', 'beam', 'from', 'the', 'largest']`
+- ids : `[29, 5, 68, 7, 74, 9, 54, 14, 5, 3624, 19, 5, 463, 26, 3, 4259]`
+
+Modele PyTorch : `Embedding` avec mean pooling masque, puis `Linear`, `ReLU`, `Dropout`, `Linear`. Pas de RNN, pas d'attention, pas de Transformer. La metrique principale est le macro-F1.
+
+| modele | accuracy test | macro-F1 test | temps entrainement |
+| --- | ---: | ---: | ---: |
+| Majorite | 0.2443 | 0.0207 | 0.00s |
+| Lineaire | 0.5003 | 0.3204 | 5.78s |
+| PyTorch | 0.5306 | 0.4322 | 51.48s |
+
+Journal d'essais PyTorch : base: macro-F1=0.4322, temps=51.48s.
+
+La courbe train loss / validation loss est enregistree dans `outputs/phase3_train_val_loss.png`.
+
+## Phase 4 - Le carnet de pannes
+
+| panne | geste exact | signature observee | test diagnostic rapide | correction |
+| --- | --- | --- | --- | --- |
+| 1 | Evaluer avec `model.train()` donc dropout actif | score test instable : 0.4151 a 0.4248, alors que le train est 0.0485 | repeter deux fois la meme evaluation sans changer les donnees | appeler `model.eval()` avant validation/test |
+| 2 | Decaler volontairement le mapping de sortie au decodage | la loss validation descend mais le macro-F1 interprete tombe a 0.0116 | comparer `class_to_id` et `id_to_class` utilises au train et au reporting | conserver un mapping unique et versionne pendant toute l'experience |
+| 3 | Mettre un learning rate quasi nul (`1e-7`) | loss train quasi plate : 2.9189 vers 2.9173 | verifier la norme des gradients et la valeur du learning rate | remettre un learning rate compatible avec Adam (`0.003` ici) |
+
+Figures : `outputs/phase4_panne1.png`, `outputs/phase4_panne2.png`, `outputs/phase4_panne3.png`.
+
+## Phase 5 - Le budget de calcul
+
+| reglage | temps | facteur gain | macro-F1 | ecart de score |
+| --- | ---: | ---: | ---: | ---: |
+| emb_dim 48 | 29.54s | 1.74 | 0.4376 | +0.0054 |
+| batch_size 512 | 41.91s | 1.23 | 0.4077 | -0.0245 |
+| hidden_dim 80 | 131.40s | 0.39 | 0.4054 | -0.0268 |
+| max_len 60 | 49.84s | 1.03 | 0.4322 | +0.0000 |
+| patience 2 | 37.72s | 1.36 | 0.4322 | +0.0000 |
+
+- temps Phase 3 : 51.48s
+- macro-F1 Phase 3 : 0.4322
+- temps Phase 5 : 28.17s
+- macro-F1 Phase 5 : 0.4376
+- facteur final : 1.83
+
+Le modele final rapide combine les reglages retenus puis est reentraine proprement sur le meme split et les memes classes. Aller trop vite peut couter en generalisation : reduire trop le modele, tronquer trop le texte ou arreter trop tot peut enlever de l'information utile et degrade le macro-F1.
+
+La comparaison temporelle est enregistree dans `outputs/phase5_time_comparison.png`. Les experiences sont enregistrees dans `outputs/phase5_experiments.csv`.
