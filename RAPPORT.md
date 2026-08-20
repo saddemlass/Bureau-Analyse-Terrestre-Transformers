@@ -361,3 +361,33 @@ Methode : occlusion leave-one-token-out sur la probabilite de la classe predite.
 - Ce cas montre que le dataset associe des mots descriptifs courts a `oval`/`light`, pas une comprehension robuste de la scene.
 - figure : `outputs\phase9_hesitant.png`
 
+## Phase 10 — Chaque mot interroge les autres
+
+Une tete d'attention manuelle projette chaque embedding en `Q`, `K` et `V`. `Q` represente la question posee par un token, `K` l'etiquette comparee chez les autres tokens, et `V` le contenu melange. Les scores sont calcules explicitement par `Q @ K.T / sqrt(d_k)`, puis `softmax` transforme chaque ligne en poids qui somment a 1. La sortie est le melange `weights @ V`.
+
+- index original : 0
+- datetime : 10/10/1949 20:30
+- city : san marcos
+- shape : cylinder
+- commentaire : `This event took place in early fall around 1949-50. It occurred after a Boy Scout meeting in the Baptist Church. The Baptist Church sit`
+- tokens : `['this', 'event', 'took', 'place', 'in', 'early', 'fall', 'around', '1949', '50', 'it', 'occurred', 'after', 'a', 'boy', 'scout', 'meeting', 'in', 'the', 'baptist', 'church', 'the', 'baptist', 'church', 'sit']`
+- formes : X=(25, 32), Q=(25, 32), K=(25, 32), V=(25, 32), weights=(25, 25), output=(25, 32)
+- preuve lignes = 1 : min=0.99999988, max=1.00000012, erreur max=1.1920929e-07
+- figure : `outputs/phase10_attention_matrix.png`
+- case pronom : ligne 0 (`this`), colonne 0 (`this`), poids=0.075994
+
+Ces poids viennent d'un mecanisme non entraine : ils montrent comment lire la matrice, pas une comprehension de la coreference.
+
+## Phase 11 — Le Conseil mélange vos mots
+
+1. L'attention seule compare les contenus mais ne contient aucune information d'ordre.
+2. Permuter les tokens permute les sorties de la meme facon : apres realignement, l'ecart est ~0.
+3. L'encodage positionnel est ajoute aux embeddings avant `Q/K/V` ; la position influence donc questions, cles et valeurs.
+
+- tokens originaux : `['this', 'event', 'took', 'place', 'in', 'early', 'fall', 'around', '1949', '50', 'it', 'occurred', 'after', 'a', 'boy', 'scout', 'meeting', 'in', 'the', 'baptist', 'church', 'the', 'baptist', 'church', 'sit']`
+- tokens permutes : `['a', '50', 'in', 'in', 'it', 'boy', 'sit', 'the', 'the', '1949', 'fall', 'this', 'took', 'after', 'early', 'event', 'place', 'scout', 'around', 'church', 'church', 'baptist', 'baptist', 'meeting', 'occurred']`
+- permutation : [13, 9, 4, 17, 10, 14, 24, 18, 21, 8, 6, 0, 2, 12, 5, 1, 3, 15, 7, 20, 23, 19, 22, 16, 11]
+- ecart avant position : 8.940696716e-08
+- ecart apres position : 0.127998054
+- encodage : sinusoidal deterministe
+- figure : `outputs/phase11_position_comparison.png`

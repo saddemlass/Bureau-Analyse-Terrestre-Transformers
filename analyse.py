@@ -24,7 +24,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score
 from sklearn.model_selection import train_test_split
 
-from models import ConvTextClassifier, TextClassifier, receptive_field_table
+from models import ConvTextClassifier, SingleHeadSelfAttention, TextClassifier, positional_encoding, receptive_field_table
 from training import (
     build_vocab,
     class_scores,
@@ -1199,6 +1199,256 @@ def compute_phase9(task: dict[str, object], phase8: dict[str, object]) -> dict[s
     return {"cases": cases, "method": "occlusion leave-one-token-out sur la probabilite de la classe predite"}
 
 
+PRONOUNS = {"it", "they", "he", "she", "this", "that", "them", "its"}
+
+
+def choose_phase10_record(df: pd.DataFrame) -> dict[str, object]:
+    candidates = []
+    for idx, row in df.iterrows():
+        comment = str(row["comments"]).strip()
+        tokens = tokenize(comment)
+        if (
+            comment
+            and 8 <= len(tokens) <= 32
+            and any(token in PRONOUNS for token in tokens)
+            and str(row["shape"]).strip()
+        ):
+            candidates.append((idx, row, tokens))
+            break
+    if not candidates:
+        raise RuntimeError("Aucun releve avec commentaire, longueur raisonnable et pronom simple.")
+    idx, row, tokens = candidates[0]
+    pronoun_index = next(i for i, token in enumerate(tokens) if token in PRONOUNS)
+    return {
+        "source_index": int(idx),
+        "datetime": str(row["datetime"]),
+        "city": str(row["city"]),
+        "shape": str(row["shape"]),
+        "comments": str(row["comments"]).strip(),
+        "tokens": tokens,
+        "pronoun_index": pronoun_index,
+        "pronoun": tokens[pronoun_index],
+    }
+
+
+def build_phase10_embeddings(tokens: list[str], embedding_dim: int = 32) -> dict[str, object]:
+    torch.manual_seed(1010)
+    vocab = {token: i for i, token in enumerate(dict.fromkeys(tokens))}
+    token_ids = torch.tensor([vocab[token] for token in tokens], dtype=torch.long)
+    embedding = torch.nn.Embedding(len(vocab), embedding_dim)
+    x = embedding(token_ids)
+    return {"vocab": vocab, "token_ids": token_ids, "embedding": embedding, "x": x}
+
+
+def run_manual_attention(x: torch.Tensor, head: SingleHeadSelfAttention) -> dict[str, torch.Tensor]:
+    with torch.no_grad():
+        return head(x)
+
+
+def assert_attention_shapes(result: dict[str, torch.Tensor], x: torch.Tensor, tol: float = 1e-6) -> dict[str, object]:
+    seq_len = x.shape[0]
+    weights = result["weights"]
+    output = result["output"]
+    assert tuple(weights.shape) == (seq_len, seq_len), f"weights shape incorrecte: {tuple(weights.shape)}"
+    assert tuple(output.shape) == tuple(x.shape), f"output shape incompatible: {tuple(output.shape)} vs {tuple(x.shape)}"
+    row_sums = weights.sum(dim=-1)
+    max_error = torch.max(torch.abs(row_sums - 1.0)).item()
+    assert max_error < tol, f"Sommes des lignes hors tolerance: {max_error}"
+    return {
+        "row_sum_min": float(row_sums.min().item()),
+        "row_sum_max": float(row_sums.max().item()),
+        "row_sum_max_error": float(max_error),
+    }
+
+
+def plot_attention_matrix(path: Path, weights: torch.Tensor, tokens: list[str], title: str) -> None:
+    fig_width = max(7.0, min(14.0, 0.48 * len(tokens)))
+    fig, ax = plt.subplots(figsize=(fig_width, fig_width * 0.78))
+    im = ax.imshow(weights.detach().numpy(), cmap="viridis", vmin=0.0)
+    ax.set_xticks(range(len(tokens)))
+    ax.set_yticks(range(len(tokens)))
+    ax.set_xticklabels(tokens, rotation=70, ha="right", fontsize=8)
+    ax.set_yticklabels(tokens, fontsize=8)
+    ax.set_xlabel("Tokens consultes")
+    ax.set_ylabel("Tokens qui posent la question")
+    ax.set_title(title)
+    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    fig.tight_layout()
+    plt.savefig(path, dpi=170)
+    plt.close()
+
+
+def deterministic_permutation(tokens: list[str]) -> torch.Tensor:
+    order = sorted(range(len(tokens)), key=lambda i: (len(tokens[i]), tokens[i], i))
+    if order == list(range(len(tokens))):
+        order = list(reversed(order))
+    return torch.tensor(order, dtype=torch.long)
+
+
+def compute_phase10(df: pd.DataFrame) -> dict[str, object]:
+    record = choose_phase10_record(df)
+    embedding_dim = 32
+    emb = build_phase10_embeddings(record["tokens"], embedding_dim)
+    torch.manual_seed(1011)
+    head = SingleHeadSelfAttention(embedding_dim)
+    attention = run_manual_attention(emb["x"], head)
+    checks = assert_attention_shapes(attention, emb["x"])
+    plot_attention_matrix(
+        OUTPUT_DIR / "phase10_attention_matrix.png",
+        attention["weights"],
+        record["tokens"],
+        "Phase 10 - Matrice d'attention mono-tete manuelle",
+    )
+    pronoun_index = int(record["pronoun_index"])
+    pronoun_weights = attention["weights"][pronoun_index]
+    top_index = int(torch.argmax(pronoun_weights).item())
+    return {
+        "record": record,
+        "embedding_dim": embedding_dim,
+        "x": emb["x"],
+        "head": head,
+        "attention": attention,
+        "checks": checks,
+        "pronoun_weights": pronoun_weights.detach().numpy().tolist(),
+        "pronoun_top_index": top_index,
+        "pronoun_top_token": record["tokens"][top_index],
+        "pronoun_top_weight": float(pronoun_weights[top_index].item()),
+        "figure": OUTPUT_DIR / "phase10_attention_matrix.png",
+    }
+
+
+def compute_phase11(phase10: dict[str, object]) -> dict[str, object]:
+    tokens = phase10["record"]["tokens"]
+    x = phase10["x"]
+    head = phase10["head"]
+    perm = deterministic_permutation(tokens)
+    inverse = torch.argsort(perm)
+
+    original = run_manual_attention(x, head)
+    permuted = run_manual_attention(x[perm], head)
+    before_diff = torch.max(torch.abs(permuted["output"][inverse] - original["output"])).item()
+
+    pe = positional_encoding(x.shape[0], x.shape[1], x.device)
+    original_pos = run_manual_attention(x + pe, head)
+    permuted_pos = run_manual_attention(x[perm] + pe, head)
+    after_diff = torch.max(torch.abs(permuted_pos["output"][inverse] - original_pos["output"])).item()
+
+    assert before_diff < 1e-6, f"Equivariance sans position non verifiee: {before_diff}"
+    assert after_diff > max(1e-4, before_diff * 1000), f"Effet positionnel trop faible: {after_diff}"
+
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+    for ax, weights, title in [
+        (axes[0], original["weights"], "Sans position"),
+        (axes[1], original_pos["weights"], "Avec position sinusoidale"),
+    ]:
+        im = ax.imshow(weights.detach().numpy(), cmap="viridis", vmin=0.0)
+        ax.set_xticks(range(len(tokens)))
+        ax.set_yticks(range(len(tokens)))
+        ax.set_xticklabels(tokens, rotation=70, ha="right", fontsize=7)
+        ax.set_yticklabels(tokens, fontsize=7)
+        ax.set_title(title)
+        ax.set_xlabel("Tokens consultes")
+    axes[0].set_ylabel("Tokens qui posent la question")
+    fig.colorbar(im, ax=axes.ravel().tolist(), fraction=0.025, pad=0.03)
+    fig.suptitle("Phase 11 - Attention avant/apres encodage positionnel")
+    fig.savefig(OUTPUT_DIR / "phase11_position_comparison.png", dpi=170, bbox_inches="tight")
+    plt.close(fig)
+
+    return {
+        "permutation": perm.tolist(),
+        "permuted_tokens": [tokens[i] for i in perm.tolist()],
+        "before_diff": float(before_diff),
+        "after_diff": float(after_diff),
+        "encoding": "sinusoidal deterministe",
+        "figure": OUTPUT_DIR / "phase11_position_comparison.png",
+    }
+
+
+def append_report_phases_10_to_11(phase10: dict[str, object], phase11: dict[str, object]) -> None:
+    record = phase10["record"]
+    shapes = phase10["attention"]
+    checks = phase10["checks"]
+    section = f"""
+
+## Phase 10 — Chaque mot interroge les autres
+
+Une tete d'attention manuelle projette chaque embedding en `Q`, `K` et `V`. `Q` represente la question posee par un token, `K` l'etiquette comparee chez les autres tokens, et `V` le contenu melange. Les scores sont calcules explicitement par `Q @ K.T / sqrt(d_k)`, puis `softmax` transforme chaque ligne en poids qui somment a 1. La sortie est le melange `weights @ V`.
+
+- index original : {record['source_index']}
+- datetime : {record['datetime']}
+- city : {record['city']}
+- shape : {record['shape']}
+- commentaire : `{record['comments']}`
+- tokens : `{record['tokens']}`
+- formes : X={tuple(phase10['x'].shape)}, Q={tuple(shapes['q'].shape)}, K={tuple(shapes['k'].shape)}, V={tuple(shapes['v'].shape)}, weights={tuple(shapes['weights'].shape)}, output={tuple(shapes['output'].shape)}
+- preuve lignes = 1 : min={checks['row_sum_min']:.8f}, max={checks['row_sum_max']:.8f}, erreur max={checks['row_sum_max_error']:.8g}
+- figure : `outputs/phase10_attention_matrix.png`
+- case pronom : ligne {record['pronoun_index']} (`{record['pronoun']}`), colonne {phase10['pronoun_top_index']} (`{phase10['pronoun_top_token']}`), poids={phase10['pronoun_top_weight']:.6f}
+
+Ces poids viennent d'un mecanisme non entraine : ils montrent comment lire la matrice, pas une comprehension de la coreference.
+
+## Phase 11 — Le Conseil mélange vos mots
+
+1. L'attention seule compare les contenus mais ne contient aucune information d'ordre.
+2. Permuter les tokens permute les sorties de la meme facon : apres realignement, l'ecart est ~0.
+3. L'encodage positionnel est ajoute aux embeddings avant `Q/K/V` ; la position influence donc questions, cles et valeurs.
+
+- tokens originaux : `{record['tokens']}`
+- tokens permutes : `{phase11['permuted_tokens']}`
+- permutation : {phase11['permutation']}
+- ecart avant position : {phase11['before_diff']:.10g}
+- ecart apres position : {phase11['after_diff']:.10g}
+- encodage : {phase11['encoding']}
+- figure : `outputs/phase11_position_comparison.png`
+"""
+    path = Path("RAPPORT.md")
+    text = path.read_text(encoding="utf-8")
+    marker = "\n## Phase 10 — Chaque mot interroge les autres"
+    text = text.split(marker)[0].rstrip() + section
+    path.write_text(text, encoding="utf-8")
+
+
+def print_phase10_to_11(phase10: dict[str, object], phase11: dict[str, object], elapsed: float) -> None:
+    record = phase10["record"]
+    attention = phase10["attention"]
+    checks = phase10["checks"]
+    print("\n=== PHASE 10 - CHAQUE MOT INTERROGE LES AUTRES ===")
+    print(f"index={record['source_index']} | datetime={record['datetime']} | city={record['city']} | shape={record['shape']}")
+    print(record["comments"])
+    print(f"tokens={record['tokens']}")
+    print(f"seq_len={len(record['tokens'])} | embedding_dim={phase10['embedding_dim']} | X={tuple(phase10['x'].shape)}")
+    print(
+        f"Q={tuple(attention['q'].shape)} | K={tuple(attention['k'].shape)} | "
+        f"V={tuple(attention['v'].shape)} | weights={tuple(attention['weights'].shape)} | "
+        f"output={tuple(attention['output'].shape)}"
+    )
+    print(
+        f"sommes lignes min={checks['row_sum_min']:.8f} | "
+        f"max={checks['row_sum_max']:.8f} | erreur max={checks['row_sum_max_error']:.10g}"
+    )
+    print(f"pronom index={record['pronoun_index']} | token={record['pronoun']}")
+    print(f"poids ligne pronom={phase10['pronoun_weights']}")
+    print(f"top consulte={phase10['pronoun_top_token']} | poids={phase10['pronoun_top_weight']:.6f}")
+
+    print("\n=== PHASE 11 - LE CONSEIL MELANGE VOS MOTS ===")
+    print(f"tokens originaux={record['tokens']}")
+    print(f"tokens permutes={phase11['permuted_tokens']}")
+    print(f"permutation={phase11['permutation']}")
+    print(f"ecart avant position={phase11['before_diff']:.10g}")
+    print(f"ecart apres position={phase11['after_diff']:.10g}")
+    print(f"encodage={phase11['encoding']}")
+    print(f"temps phase 10-11={elapsed:.2f}s")
+
+
+def run_phase10_to_11(df: pd.DataFrame) -> tuple[dict[str, object], dict[str, object], float]:
+    start = time.perf_counter()
+    phase10 = compute_phase10(df)
+    phase11 = compute_phase11(phase10)
+    append_report_phases_10_to_11(phase10, phase11)
+    elapsed = time.perf_counter() - start
+    return phase10, phase11, elapsed
+
+
 def append_report(task: dict[str, object], phase3: dict[str, object], phase4: dict[str, object], phase5: dict[str, object]) -> None:
     audit = task["audit"]
     classes = ", ".join(task["classes"])
@@ -1482,7 +1732,7 @@ def print_phase6_to_9(phase6: dict[str, object], phase7: dict[str, object], phas
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Bureau d'analyse terrestre")
-    parser.add_argument("--phase", choices=["6", "7", "8", "9"], help="executer rapidement une phase 6-9")
+    parser.add_argument("--phase", choices=["6", "7", "8", "9", "10", "11", "10-11"], help="executer rapidement une phase ciblee")
     return parser.parse_args()
 
 
@@ -1499,6 +1749,13 @@ def main() -> None:
     download_dataset()
     raw_df, load_report = load_dataset()
     df = prepare_dates(raw_df)
+
+    if args.phase in {"10", "11", "10-11"}:
+        phase10, phase11, elapsed = run_phase10_to_11(df)
+        print_phase10_to_11(phase10, phase11, elapsed)
+        print(f"\nPhase demandee terminee: {args.phase}")
+        return
+
     shape_task = prepare_shape_task(df, load_report)
 
     if args.phase:

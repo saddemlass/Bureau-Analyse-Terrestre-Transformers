@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import torch
 
 
@@ -97,6 +99,33 @@ class ConvTextClassifier(torch.nn.Module):
         lengths = mask.sum(dim=1).clamp_min(1)
         pooled = x.sum(dim=1) / lengths
         return self.classifier(pooled)
+
+
+class SingleHeadSelfAttention(torch.nn.Module):
+    def __init__(self, embedding_dim: int) -> None:
+        super().__init__()
+        self.wq = torch.nn.Linear(embedding_dim, embedding_dim)
+        self.wk = torch.nn.Linear(embedding_dim, embedding_dim)
+        self.wv = torch.nn.Linear(embedding_dim, embedding_dim)
+
+    def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
+        q = self.wq(x)
+        k = self.wk(x)
+        v = self.wv(x)
+        scores = q @ k.T / math.sqrt(q.shape[-1])
+        weights = torch.softmax(scores, dim=-1)
+        output = weights @ v
+        return {"q": q, "k": k, "v": v, "scores": scores, "weights": weights, "output": output}
+
+
+def positional_encoding(seq_len: int, embedding_dim: int, device: torch.device | None = None) -> torch.Tensor:
+    positions = torch.arange(seq_len, dtype=torch.float32, device=device).unsqueeze(1)
+    dims = torch.arange(0, embedding_dim, 2, dtype=torch.float32, device=device)
+    div_term = torch.exp(dims * (-math.log(10000.0) / embedding_dim))
+    pe = torch.zeros(seq_len, embedding_dim, dtype=torch.float32, device=device)
+    pe[:, 0::2] = torch.sin(positions * div_term)
+    pe[:, 1::2] = torch.cos(positions * div_term[: pe[:, 1::2].shape[1]])
+    return pe
 
 
 def receptive_field_table(kernels: list[int], dilations: list[int], strides: list[int]) -> list[dict[str, int]]:
