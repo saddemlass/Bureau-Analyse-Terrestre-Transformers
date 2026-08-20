@@ -549,3 +549,34 @@ BERT-tiny Phase 14 (`prajjwal1/bert-tiny`) est un encodeur/classifieur, pas un m
 
 Fichiers : `outputs/phase15_questions.csv`, `outputs/phase15_source_audit.csv`, `outputs/phase15_retrieval_comparison.png`.
 
+## Phase 16 — Faire entrer le tout dans le vaisseau
+
+### Marge fixee avant optimisation
+`PHASE16_MAX_MACRO_F1_DROP = 0.02`. Une variante est acceptable uniquement si `macro_f1_optimized >= macro_f1_reference - 0.02`. Cette marge est fixee avant les mesures Phase 16 et n'est pas ajustee apres observation.
+
+### Modele de depart
+Modele pertinent issu de Phase 14/15 : `checkpoints\phase14\lora` (`prajjwal1/bert-tiny` + adaptateur LoRA Phase 14). Score historique Phase 14 : macro-F1=0.1281. Score mesure dans le protocole Phase 16 : macro-F1=0.1090, accuracy=0.2793.
+
+### Protocole de benchmark
+Meme machine, CPU uniquement, `model.eval()`, `torch.inference_mode()`, tokenizer `prajjwal1/bert-tiny`, max_length=64, batch_size=1, 512 exemples fixes du test masque Phase 14, warmup=16, repetitions=2. Le protocole reste identique pour baseline, quantification et export.
+
+BASELINE PHASE 16 : macro-F1=0.1090, accuracy=0.2793, poids=16.76 MiB, latence moyenne=1.61 ms, mediane=1.45 ms, p95=2.54 ms, reponses/s=618.40.
+
+### Resultats
+| variante | macro-F1 | accuracy | delta macro-F1 | disque MiB | compression | latence moy. ms | latence med. ms | p95 ms | reponses/s | speedup | marge | decision |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| baseline | 0.1090 | 0.2793 | +0.0000 | 16.76 | 0.00 | 1.61 | 1.45 | 2.54 | 618.40 | 0.00 | OUI | REFERENCE |
+| quantification | 0.1094 | 0.2812 | +0.0004 | 15.59 | 1.07 | 4.27 | 3.79 | 6.86 | 233.02 | 0.38 | OUI | ACCEPTE |
+| torchscript | 0.1090 | 0.2793 | +0.0000 | 16.82 | 1.00 | 0.88 | 0.75 | 1.46 | 1119.05 | 1.81 | OUI | ACCEPTE |
+
+Quantification : quantification dynamique CPU PyTorch appliquee aux couches `Linear`, sans reentrainement complet. Export autonome : TorchScript exporte et recharge.
+
+### Decision
+Meilleure variante retenue : `torchscript`. Nous nous sommes arretes a torchscript parce que son macro-F1 reste dans la marge fixee a l'avance (0.02) avec un speedup 1.81 pour une taille quasi stable; poursuivre demanderait un cout experimental moins justifie.
+
+Distillation identifiee comme troisieme piste mais non executee car une solution acceptable a deja ete obtenue avec un cout experimental bien inferieur.
+
+Piste suivante qui aurait ete testee : distillation d'un petit modele si aucune optimisation sans entrainement n'avait respecte la marge ou si un gain supplementaire etait necessaire.
+
+Fichiers : `outputs/phase16_optimization.csv`, `outputs/phase16_score_size.png`, `outputs/phase16_latency.png`.
+

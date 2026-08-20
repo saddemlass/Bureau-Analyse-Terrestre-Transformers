@@ -24,6 +24,7 @@ from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score
 from sklearn.model_selection import train_test_split
+from transformers import BertTokenizer
 
 from models import (
     ConvTextClassifier,
@@ -54,6 +55,7 @@ from pretrained import (
     tokenizer_audit,
 )
 from retrieval import run_phase15
+from optimization import PHASE16_MAX_MACRO_F1_DROP, run_phase16
 
 
 DATA_URLS = [
@@ -2309,11 +2311,79 @@ def print_phase15(result: dict[str, object]) -> None:
     print(f"Temps Phase 15={result['elapsed_s']:.2f}s")
 
 
+def append_report_phase16(result: dict[str, object]) -> None:
+    rows = result["rows"]
+    best = result["best"]
+    protocol = result["protocol"]
+    table = "\n".join(
+        "| {variant} | {macro_f1:.4f} | {accuracy:.4f} | {delta_macro_f1:+.4f} | {disk_mib:.2f} | {compression_ratio:.2f} | {mean_latency_ms:.2f} | {median_latency_ms:.2f} | {p95_latency_ms:.2f} | {responses_per_second:.2f} | {speedup:.2f} | {within_margin} | {decision} |".format(**row)
+        for row in rows
+    )
+    gain = (
+        f"un speedup {best['speedup']:.2f} pour une taille quasi stable"
+        if float(best["speedup"]) >= float(best["compression_ratio"])
+        else f"un ratio de compression {best['compression_ratio']:.2f} malgre une vitesse moins favorable"
+    )
+    stop_reason = (
+        f"Nous nous sommes arretes a {best['variant']} parce que son macro-F1 reste dans la marge fixee "
+        f"a l'avance ({PHASE16_MAX_MACRO_F1_DROP:.2f}) avec {gain}; poursuivre demanderait un cout experimental moins justifie."
+    )
+    section = f"""
+
+## Phase 16 — Faire entrer le tout dans le vaisseau
+
+### Marge fixee avant optimisation
+`PHASE16_MAX_MACRO_F1_DROP = {PHASE16_MAX_MACRO_F1_DROP:.2f}`. Une variante est acceptable uniquement si `macro_f1_optimized >= macro_f1_reference - 0.02`. Cette marge est fixee avant les mesures Phase 16 et n'est pas ajustee apres observation.
+
+### Modele de depart
+Modele pertinent issu de Phase 14/15 : `{result['reference_model']}` (`prajjwal1/bert-tiny` + adaptateur LoRA Phase 14). Score historique Phase 14 : macro-F1={result['historical_macro_f1']:.4f}. Score mesure dans le protocole Phase 16 : macro-F1={rows[0]['macro_f1']:.4f}, accuracy={rows[0]['accuracy']:.4f}.
+
+### Protocole de benchmark
+Meme machine, CPU uniquement, `model.eval()`, `torch.inference_mode()`, tokenizer `{protocol['tokenizer']}`, max_length={protocol['max_length']}, batch_size={protocol['batch_size']}, {protocol['benchmark_n']} exemples fixes du test masque Phase 14, warmup={protocol['warmup']}, repetitions={protocol['repeats']}. Le protocole reste identique pour baseline, quantification et export.
+
+BASELINE PHASE 16 : macro-F1={rows[0]['macro_f1']:.4f}, accuracy={rows[0]['accuracy']:.4f}, poids={rows[0]['disk_mib']:.2f} MiB, latence moyenne={rows[0]['mean_latency_ms']:.2f} ms, mediane={rows[0]['median_latency_ms']:.2f} ms, p95={rows[0]['p95_latency_ms']:.2f} ms, reponses/s={rows[0]['responses_per_second']:.2f}.
+
+### Resultats
+| variante | macro-F1 | accuracy | delta macro-F1 | disque MiB | compression | latence moy. ms | latence med. ms | p95 ms | reponses/s | speedup | marge | decision |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+{table}
+
+Quantification : quantification dynamique CPU PyTorch appliquee aux couches `Linear`, sans reentrainement complet. Export autonome : {result['export_note']}
+
+### Decision
+Meilleure variante retenue : `{best['variant']}`. {stop_reason}
+
+{result['distillation_note']}
+
+Piste suivante qui aurait ete testee : distillation d'un petit modele si aucune optimisation sans entrainement n'avait respecte la marge ou si un gain supplementaire etait necessaire.
+
+Fichiers : `outputs/phase16_optimization.csv`, `outputs/phase16_score_size.png`, `outputs/phase16_latency.png`.
+"""
+    report = Path("RAPPORT.md")
+    text = report.read_text(encoding="utf-8", errors="replace") if report.exists() else ""
+    marker = "\n## Phase 16 "
+    if marker in text:
+        text = text.split(marker)[0].rstrip() + section
+    else:
+        text = text.rstrip() + section
+    report.write_text(text + "\n", encoding="utf-8")
+
+
+def print_phase16(result: dict[str, object]) -> None:
+    print("\n=== PHASE 16 - FAIRE ENTRER LE TOUT DANS LE VAISSEAU ===")
+    print(f"Modele reference exact: {result['reference_model']}")
+    print(f"Marge macro-F1 fixee avant optimisation: {PHASE16_MAX_MACRO_F1_DROP:.2f}")
+    print("BASELINE PHASE 16")
+    print(pd.DataFrame(result["rows"]).to_string(index=False))
+    print(f"Variante retenue: {result['best']['variant']}")
+    print(f"Temps Phase 16={result['elapsed_s']:.2f}s")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Bureau d'analyse terrestre")
     parser.add_argument(
         "--phase",
-        choices=["6", "7", "8", "9", "10", "11", "10-11", "12", "13", "12-13", "14", "15"],
+        choices=["6", "7", "8", "9", "10", "11", "10-11", "12", "13", "12-13", "14", "15", "16"],
         help="executer rapidement une phase ciblee",
     )
     return parser.parse_args()
@@ -2353,6 +2423,18 @@ def main() -> None:
         return
 
     shape_task = prepare_shape_task(df, load_report)
+
+    if args.phase == "16":
+        words = forbidden_shape_words(shape_task["classes"])
+        masked_task, counts = masked_shape_task(shape_task, words)
+        assert counts["after"] == 0
+        assert np.array_equal(shape_task["test_idx"], masked_task["test_idx"])
+        tokenizer = BertTokenizer.from_pretrained(MODEL_NAME, local_files_only=True)
+        phase16 = run_phase16(phase14_splits(masked_task), tokenizer, masked_task["classes"], OUTPUT_DIR)
+        append_report_phase16(phase16)
+        print_phase16(phase16)
+        print(f"\nPhase demandee terminee: {args.phase}")
+        return
 
     if args.phase == "14":
         phase14 = compute_phase14(shape_task)
