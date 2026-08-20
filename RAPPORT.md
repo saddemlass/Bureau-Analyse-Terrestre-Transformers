@@ -202,10 +202,10 @@ Modele PyTorch : `Embedding` avec mean pooling masque, puis `Linear`, `ReLU`, `D
 | modele | accuracy test | macro-F1 test | temps entrainement |
 | --- | ---: | ---: | ---: |
 | Majorite | 0.2443 | 0.0207 | 0.00s |
-| Lineaire | 0.5003 | 0.3204 | 5.78s |
-| PyTorch | 0.5306 | 0.4322 | 51.48s |
+| Lineaire | 0.5003 | 0.3204 | 7.16s |
+| PyTorch | 0.5306 | 0.4322 | 52.95s |
 
-Journal d'essais PyTorch : base: macro-F1=0.4322, temps=51.48s.
+Journal d'essais PyTorch : base: macro-F1=0.4322, temps=52.95s.
 
 La courbe train loss / validation loss est enregistree dans `outputs/phase3_train_val_loss.png`.
 
@@ -223,18 +223,141 @@ Figures : `outputs/phase4_panne1.png`, `outputs/phase4_panne2.png`, `outputs/pha
 
 | reglage | temps | facteur gain | macro-F1 | ecart de score |
 | --- | ---: | ---: | ---: | ---: |
-| emb_dim 48 | 29.54s | 1.74 | 0.4376 | +0.0054 |
-| batch_size 512 | 41.91s | 1.23 | 0.4077 | -0.0245 |
-| hidden_dim 80 | 131.40s | 0.39 | 0.4054 | -0.0268 |
-| max_len 60 | 49.84s | 1.03 | 0.4322 | +0.0000 |
-| patience 2 | 37.72s | 1.36 | 0.4322 | +0.0000 |
+| emb_dim 48 | 28.54s | 1.86 | 0.4376 | +0.0054 |
+| batch_size 512 | 41.19s | 1.29 | 0.4077 | -0.0245 |
+| hidden_dim 80 | 52.02s | 1.02 | 0.4054 | -0.0268 |
+| max_len 60 | 47.27s | 1.12 | 0.4322 | +0.0000 |
+| patience 2 | 43.04s | 1.23 | 0.4322 | +0.0000 |
 
-- temps Phase 3 : 51.48s
+- temps Phase 3 : 52.95s
 - macro-F1 Phase 3 : 0.4322
-- temps Phase 5 : 28.17s
+- temps Phase 5 : 32.85s
 - macro-F1 Phase 5 : 0.4376
-- facteur final : 1.83
+- facteur final : 1.61
 
 Le modele final rapide combine les reglages retenus puis est reentraine proprement sur le meme split et les memes classes. Aller trop vite peut couter en generalisation : reduire trop le modele, tronquer trop le texte ou arreter trop tot peut enlever de l'information utile et degrade le macro-F1.
 
 La comparaison temporelle est enregistree dans `outputs/phase5_time_comparison.png`. Les experiences sont enregistrees dans `outputs/phase5_experiments.csv`.
+
+## Phase 6 — Le champ de vision du modèle
+
+- longueur max avant troncature : 55 tokens
+- longueur mediane : 14.0 tokens
+- `max_len` accepte : 60 tokens, ce qui couvre 100.0 % des textes supervises
+- architecture : `Embedding -> projection -> Conv1d dilatees residuelles + BatchNorm -> pooling masque -> MLP`
+
+| couche | kernel | dilation | stride | champ ajoute | champ cumule |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 3 | 1 | 1 | 2 | 3 |
+| 2 | 3 | 2 | 1 | 4 | 7 |
+| 3 | 3 | 4 | 1 | 8 | 15 |
+| 4 | 3 | 8 | 1 | 16 | 31 |
+| 5 | 3 | 16 | 1 | 32 | 63 |
+
+Le champ receptif final vaut 63 tokens, donc il couvre le `max_len` de 60. Avant entrainement, j'ai modifie le premier token d'un vrai releve : `saw` vers `zzztoken`. L'ecart max absolu des logits vaut 0.049449, donc la sortie change deja avec des poids identiques.
+
+| modele | accuracy | macro-F1 | temps |
+| --- | ---: | ---: | ---: |
+| reference Phase 3/5 | 0.5283 | 0.4376 | 32.85s |
+| convolution Phase 6 | 0.4495 | 0.1797 | 28.08s |
+
+La courbe est `outputs/phase6_train_val_loss.png`, le tableau est `outputs/phase6_receptive_field.csv`.
+
+## Phase 7 — Quatre relevés à la fois
+
+Le modele Phase 6 contenait `BatchNorm1d`. Avec un batch de 4, ses statistiques de moyenne et variance dependent fortement des trois autres releves places dans le meme lot. Ces statistiques sont beaucoup plus bruitees qu'avec un batch de 128, et la prediction d'un releve depend alors du contenu des autres releves du batch.
+
+Le diagnostic a aussi montre que l'ancien essai etait plafonne a seulement 10 lots par epoque : les gradients existaient, mais le modele voyait trop peu de donnees et finissait par predire presque uniquement `light`. La correction utilise `GroupNorm` dans les blocs Conv1d, donc la normalisation est calculee par releve et ne depend plus des autres exemples. Le batch utilise par le modele corrige reste bien 4.
+
+| experience | accuracy | macro-F1 | temps |
+| --- | ---: | ---: | ---: |
+| ancien BatchNorm, batch=4 | 0.2443 | 0.0207 | 8.44s |
+| corrige GroupNorm, batch=4 | 0.4697 | 0.2183 | 153.46s |
+| corrige GroupNorm, batch normal | 0.4329 | 0.1650 | 29.81s |
+
+Inference batch=1 : OUI. Figure : `outputs/phase7_batch4_comparison.png`.
+
+## Phase 8 — Le Conseil a lu trois relevés
+
+Liste interdite construite depuis les classes retenues et les fusions connues : changed, changing, changings, chevron, chevrons, cigar, cigars, circle, circles, cone, cones, cross, crosses, cylinder, cylinders, diamond, diamonds, disk, disks, egg, eggs, fireball, fireballs, flash, flashs, formation, formations, light, lights, oval, ovals, rectangle, rectangles, round, rounds, sphere, spheres, teardrop, teardrops, triangle, triangles.
+
+Politique : je remplace les mots par `<MASKSHAPE>`. Le token garde l'information qu'un mot interdit etait present, mais interdit la recopie directe du nom de classe. Le remplacement utilise des bornes de mots, donc `light` ne coupe pas un mot plus long.
+
+- releves avec mot interdit avant traitement : 44495
+- releves avec mot interdit apres traitement : 0
+
+| modele | accuracy | macro-F1 |
+| --- | ---: | ---: |
+| avant interdiction | 0.4697 | 0.2183 |
+| apres interdiction | 0.3458 | 0.0944 |
+
+Classes chutant le plus :
+
+| classe | F1 avant | F1 apres | delta |
+| --- | ---: | ---: | ---: |
+| cigar | 0.5085 | 0.0000 | -0.5085 |
+| sphere | 0.4374 | 0.0000 | -0.4374 |
+| fireball | 0.6066 | 0.2145 | -0.3921 |
+
+Comparaison demandee :
+
+| classe | precision avant | recall avant | F1 avant | precision apres | recall apres | F1 apres |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| circle | 0.4188 | 0.1932 | 0.2644 | 0.3353 | 0.1364 | 0.1939 |
+| light | 0.3828 | 0.9176 | 0.5402 | 0.3386 | 0.8874 | 0.4902 |
+| triangle | 0.7046 | 0.6703 | 0.6870 | 0.5212 | 0.4827 | 0.5012 |
+
+Le macro-F1 chute plus directement que l'accuracy quand les petites classes perdent leurs indices lexicaux. L'accuracy reste dominee par les classes frequentes, alors que le macro-F1 donne le meme poids moyen a chaque classe.
+
+Fichiers : `outputs/phase8_class_scores.csv`, `outputs/phase8_before_after.png`.
+
+## Phase 9 — Rendre des comptes sur trois décisions
+
+Methode : occlusion leave-one-token-out sur la probabilite de la classe predite. Pour chaque token, je masque seulement ce token et je mesure la baisse de probabilite de la classe predite.
+
+### correct
+- index original : 69127
+- datetime : 7/4/2011 13:00
+- city : cooks mills (welland) (canada)
+- vraie shape : disk
+- shape predite : disk
+- top2 : disk=0.998, circle=0.001
+- marge top1-top2 : 0.9968
+- temoignage : `White saucer appears over city and disappears`
+- temoignage masque lu par le modele : `White saucer appears over city and disappears`
+- mots les plus influents : saucer, and, white, appears, over
+- Le modele retient surtout saucer, and, white, appears pour choisir `disk`.
+- Il laisse peu peser disappears, city, over, alors qu'un humain lirait aussi le contexte complet.
+- Ce cas montre que le dataset associe des mots descriptifs courts a `disk`/`disk`, pas une comprehension robuste de la scene.
+- figure : `outputs\phase9_correct.png`
+### wrong
+- index original : 63313
+- datetime : 7/15/2001 04:19
+- city : bournemouth (uk/england)
+- vraie shape : cross
+- shape predite : light
+- top2 : light=0.491, circle=0.100
+- marge top1-top2 : 0.3905
+- temoignage : `very bright static light sighted early morning in the East on July 15th 2001`
+- temoignage masque lu par le modele : `very bright static  <MASKSHAPE>  sighted early morning in the East on July 15th 2001`
+- mots les plus influents : bright, maskshape, east, 15th, in
+- Le modele retient surtout bright, maskshape, east, 15th pour choisir `light`.
+- Il laisse peu peser july, very, 2001, alors qu'un humain lirait aussi le contexte complet.
+- Ce cas montre que le dataset associe des mots descriptifs courts a `cross`/`light`, pas une comprehension robuste de la scene.
+- figure : `outputs\phase9_wrong.png`
+### hesitant
+- index original : 66041
+- datetime : 7/24/2004 23:00
+- city : lynnwood
+- vraie shape : oval
+- shape predite : light
+- top2 : light=0.137, disk=0.137
+- marge top1-top2 : 0.0000
+- temoignage : `Near Seattle&#44 east to west siting&#44 full stop&#44 and then lit large object`
+- temoignage masque lu par le modele : `Near Seattle&#44 east to west siting&#44 full stop&#44 and then lit large object`
+- mots les plus influents : full, to, then, near, east
+- Le modele retient surtout full, to, then, near pour choisir `light`.
+- Il laisse peu peser object, lit, large, alors qu'un humain lirait aussi le contexte complet.
+- Ce cas montre que le dataset associe des mots descriptifs courts a `oval`/`light`, pas une comprehension robuste de la scene.
+- figure : `outputs\phase9_hesitant.png`
+

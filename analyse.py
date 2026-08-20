@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import argparse
 import os
 import re
 import time
@@ -23,8 +24,18 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score
 from sklearn.model_selection import train_test_split
 
-from models import TextClassifier
-from training import build_vocab, encode_texts, evaluate_model, make_loader, set_seeds, train_model
+from models import ConvTextClassifier, TextClassifier, receptive_field_table
+from training import (
+    build_vocab,
+    class_scores,
+    encode_texts,
+    evaluate_model,
+    make_loader,
+    predict_classes,
+    predict_logits,
+    set_seeds,
+    train_model,
+)
 
 
 DATA_URLS = [
@@ -587,6 +598,10 @@ def make_torch_data(task: dict[str, object], max_vocab: int, max_len: int, batch
         "train_loader": make_loader(x_train, y_train, batch_size, True),
         "val_loader": make_loader(x_val, y_val, batch_size, False),
         "test_loader": make_loader(x_test, y_test, batch_size, False),
+        "x_val": x_val,
+        "y_val_tensor": y_val,
+        "x_test": x_test,
+        "y_test_tensor": y_test,
         "train_y": y_train.numpy(),
         "val_y": y_val.numpy(),
         "test_y": y_test.numpy(),
@@ -603,15 +618,22 @@ def run_torch_experiment(task: dict[str, object], config: dict[str, object]) -> 
         hidden_dim=config["hidden_dim"],
         dropout=config["dropout"],
     )
+    val_loader = data["val_loader"]
+    if config["batch_size"] == 4:
+        val_loader = make_loader(data["x_val"], data["y_val_tensor"], 128, False)
     history = train_model(
         model,
         data["train_loader"],
-        data["val_loader"],
+        val_loader,
         lr=config["lr"],
         max_epochs=config["max_epochs"],
         patience=config["patience"],
+        max_train_batches=config.get("max_train_batches"),
     )
-    metrics = evaluate_model(model, data["test_loader"], data["test_y"])
+    eval_loader = data["test_loader"]
+    if config["batch_size"] == 4:
+        eval_loader = make_loader(data["x_test"], data["y_test_tensor"], 128, False)
+    metrics = evaluate_model(model, eval_loader, data["test_y"])
     raw_text = subset(task, "train")["comments_clean"].iloc[0]
     tokens = tokenize(raw_text)
     ids = [data["vocab"].get(token, 1) for token in tokens[: min(16, len(tokens))]]
@@ -826,6 +848,357 @@ def compute_phase5(task: dict[str, object], phase3: dict[str, object]) -> dict[s
     return {"experiments": experiments, "final": final}
 
 
+def token_length_stats(task: dict[str, object]) -> dict[str, object]:
+    lengths = task["data"]["comments_clean"].map(lambda text: len(tokenize(text)))
+    return {
+        "max_tokens_before_truncation": int(lengths.max()),
+        "median_tokens": float(lengths.median()),
+        "pct_covered_by_60": float((lengths <= 60).mean()),
+    }
+
+
+def run_conv_experiment(task: dict[str, object], config: dict[str, object]) -> dict[str, object]:
+    set_seeds(7)
+    data = make_torch_data(task, config["max_vocab"], config["max_len"], config["batch_size"])
+    model = ConvTextClassifier(
+        len(data["vocab"]),
+        len(task["classes"]),
+        emb_dim=config["emb_dim"],
+        channels=config["channels"],
+        dilations=tuple(config["dilations"]),
+        kernel=config["kernel"],
+        dropout=config["dropout"],
+        norm=config["norm"],
+    )
+    history = train_model(
+        model,
+        data["train_loader"],
+        data["val_loader"],
+        lr=config["lr"],
+        max_epochs=config["max_epochs"],
+        patience=config["patience"],
+        max_train_batches=config.get("max_train_batches"),
+    )
+    eval_loader = data["test_loader"]
+    if config["batch_size"] == 4:
+        eval_loader = make_loader(data["x_test"], data["y_test_tensor"], 128, False)
+    metrics = evaluate_model(model, eval_loader, data["test_y"])
+    return {
+        "model": model,
+        "data": data,
+        "history": history,
+        "accuracy": metrics["accuracy"],
+        "macro_f1": metrics["macro_f1"],
+        "train_time": history.train_time,
+        "config": config,
+    }
+
+
+def phase6_config(norm: str = "batch", batch_size: int = 128) -> dict[str, object]:
+    config = {
+        "name": f"conv_{norm}_b{batch_size}",
+        "max_vocab": 12000,
+        "max_len": 60,
+        "batch_size": batch_size,
+        "emb_dim": 32,
+        "channels": 16,
+        "dilations": [1, 2, 4, 8, 16],
+        "kernel": 3,
+        "dropout": 0.20,
+        "norm": norm,
+        "lr": 0.003,
+        "max_epochs": 2,
+        "patience": 1,
+    }
+    return config
+
+
+def phase7_config(norm: str, batch_size: int, max_train_batches: int | None = None) -> dict[str, object]:
+    config = phase6_config(norm, batch_size)
+    if max_train_batches is not None:
+        config["max_train_batches"] = max_train_batches
+    return config
+
+
+def token_start_probe(task: dict[str, object], config: dict[str, object]) -> dict[str, object]:
+    set_seeds(7)
+    train = subset(task, "train")
+    vocab = build_vocab(train["comments_clean"].tolist(), max_vocab=config["max_vocab"], min_freq=2)
+    row = train[train["comments_clean"].map(lambda text: len(tokenize(text)) >= 4)].iloc[0]
+    tokens = tokenize(row["comments_clean"])
+    replacement = "zzztoken"
+    changed_tokens = [replacement] + tokens[1:]
+    original = " ".join(tokens)
+    changed = " ".join(changed_tokens)
+    x_original = encode_texts([original], vocab, max_len=config["max_len"])
+    x_changed = encode_texts([changed], vocab, max_len=config["max_len"])
+    model = ConvTextClassifier(
+        len(vocab),
+        len(task["classes"]),
+        emb_dim=config["emb_dim"],
+        channels=config["channels"],
+        dilations=tuple(config["dilations"]),
+        kernel=config["kernel"],
+        dropout=config["dropout"],
+        norm=config["norm"],
+    )
+    model.eval()
+    with torch.no_grad():
+        diff = model(x_original) - model(x_changed)
+    return {
+        "source_index": int(row["row_id"]),
+        "text": str(row["comments_clean"]),
+        "token_original": tokens[0],
+        "token_modified": replacement,
+        "logit_l2": float(torch.linalg.vector_norm(diff).item()),
+        "logit_max_abs": float(diff.abs().max().item()),
+    }
+
+
+def compute_phase6(task: dict[str, object], phase3: dict[str, object] | None = None, phase5: dict[str, object] | None = None) -> dict[str, object]:
+    config = phase6_config("batch", 128)
+    stats = token_length_stats(task)
+    rf_rows = receptive_field_table([config["kernel"]] * len(config["dilations"]), config["dilations"], [1] * len(config["dilations"]))
+    pd.DataFrame(rf_rows).to_csv(OUTPUT_DIR / "phase6_receptive_field.csv", index=False)
+    probe = token_start_probe(task, config)
+    result = run_conv_experiment(task, config)
+    plot_losses(
+        OUTPUT_DIR / "phase6_train_val_loss.png",
+        "Phase 6 - Loss train/validation modele convolutionnel",
+        result["history"].train_losses,
+        result["history"].val_losses,
+    )
+    reference = phase5["final"] if phase5 is not None else (phase3["torch"] if phase3 is not None else None)
+    return {
+        "stats": stats,
+        "rf_rows": rf_rows,
+        "probe": probe,
+        "conv": result,
+        "reference": reference,
+    }
+
+
+def compute_phase7(task: dict[str, object], phase6: dict[str, object]) -> dict[str, object]:
+    old_batch4 = run_conv_experiment(task, phase7_config("batch", 4, max_train_batches=10))
+    fixed_batch4 = run_conv_experiment(task, phase7_config("group", 4, max_train_batches=6000))
+    fixed_normal = run_conv_experiment(task, phase7_config("group", phase6["conv"]["config"]["batch_size"]))
+
+    plt.figure(figsize=(9, 5))
+    plt.plot(old_batch4["history"].val_losses, label="ancien BatchNorm, batch=4")
+    plt.plot(fixed_batch4["history"].val_losses, label="corrige GroupNorm, batch=4")
+    plt.title("Phase 7 - Comparaison batch size 4")
+    plt.xlabel("Epoch")
+    plt.ylabel("Validation loss")
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(OUTPUT_DIR / "phase7_batch4_comparison.png", dpi=160)
+    plt.close()
+
+    xb, _ = next(iter(fixed_batch4["data"]["test_loader"]))
+    ok_batch1 = False
+    fixed_batch4["model"].eval()
+    with torch.no_grad():
+        logits = fixed_batch4["model"](xb[:1])
+        ok_batch1 = tuple(logits.shape) == (1, len(task["classes"])) and torch.isfinite(logits).all().item()
+
+    return {
+        "old_batch4": old_batch4,
+        "fixed_batch4": fixed_batch4,
+        "fixed_normal": fixed_normal,
+        "batch1_ok": bool(ok_batch1),
+    }
+
+
+def plural_variants(word: str) -> set[str]:
+    variants = {word}
+    if word.endswith("s"):
+        variants.add(word + "es")
+    elif word.endswith("y"):
+        variants.add(word[:-1] + "ies")
+    else:
+        variants.add(word + "s")
+    return variants
+
+
+def forbidden_shape_words(classes: list[str]) -> list[str]:
+    words: set[str] = set()
+    for shape in classes:
+        words.update(plural_variants(shape))
+    words.update({"round", "rounds", "circle", "circles", "changed", "changing", "light", "lights"})
+    return sorted(words)
+
+
+def forbidden_regex(words: list[str]) -> re.Pattern[str]:
+    pattern = "|".join(re.escape(word) for word in sorted(words, key=len, reverse=True))
+    return re.compile(rf"(?<![a-z0-9])(?:{pattern})(?![a-z0-9])", re.IGNORECASE)
+
+
+def count_forbidden(texts: pd.Series, regex: re.Pattern[str]) -> int:
+    return int(texts.astype(str).map(lambda text: bool(regex.search(text))).sum())
+
+
+def masked_shape_task(task: dict[str, object], words: list[str]) -> tuple[dict[str, object], dict[str, int]]:
+    regex = forbidden_regex(words)
+    masked = {**task, "data": task["data"].copy()}
+    before = count_forbidden(masked["data"]["comments_clean"], regex)
+    masked["data"]["comments_clean"] = masked["data"]["comments_clean"].astype(str).map(
+        lambda text: regex.sub(" <MASKSHAPE> ", text)
+    )
+    after = count_forbidden(masked["data"]["comments_clean"], regex)
+    assert after == 0, f"Phase 8 echouee: {after} releves contiennent encore un mot interdit"
+    return masked, {"before": before, "after": after}
+
+
+def plot_before_after(path: Path, before: dict[str, object], after: dict[str, object]) -> None:
+    labels = ["accuracy", "macro-F1"]
+    before_vals = [before["accuracy"], before["macro_f1"]]
+    after_vals = [after["accuracy"], after["macro_f1"]]
+    x = np.arange(len(labels))
+    width = 0.36
+    plt.figure(figsize=(7, 4.8))
+    plt.bar(x - width / 2, before_vals, width, label="avant")
+    plt.bar(x + width / 2, after_vals, width, label="apres masquage")
+    plt.xticks(x, labels)
+    plt.ylim(0, max(before_vals + after_vals) * 1.25)
+    plt.title("Phase 8 - Avant/apres interdiction des mots de forme")
+    plt.ylabel("Score test")
+    plt.grid(True, axis="y", alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(path, dpi=160)
+    plt.close()
+
+
+def compute_phase8(task: dict[str, object], phase7: dict[str, object]) -> dict[str, object]:
+    words = forbidden_shape_words(task["classes"])
+    masked_task, counts = masked_shape_task(task, words)
+    before = phase7.get("fixed_batch4", phase7["fixed_normal"])
+    after_config = phase7_config(
+        "group",
+        before["config"]["batch_size"],
+        before["config"].get("max_train_batches"),
+    )
+    after = run_conv_experiment(masked_task, after_config)
+    before_eval_loader = make_loader(before["data"]["x_test"], before["data"]["y_test_tensor"], 128, False)
+    after_eval_loader = make_loader(after["data"]["x_test"], after["data"]["y_test_tensor"], 128, False)
+    y_before = predict_classes(before["model"], before_eval_loader)
+    y_after = predict_classes(after["model"], after_eval_loader)
+    scores_before = class_scores(before["data"]["test_y"], y_before, task["classes"]).rename(
+        columns={"precision": "precision_avant", "recall": "recall_avant", "f1": "f1_avant", "support": "support_avant"}
+    )
+    scores_after = class_scores(after["data"]["test_y"], y_after, task["classes"]).rename(
+        columns={"precision": "precision_apres", "recall": "recall_apres", "f1": "f1_apres", "support": "support_apres"}
+    )
+    scores = scores_before.merge(scores_after, on="classe")
+    scores["delta_f1"] = scores["f1_apres"] - scores["f1_avant"]
+    scores.to_csv(OUTPUT_DIR / "phase8_class_scores.csv", index=False)
+    plot_before_after(OUTPUT_DIR / "phase8_before_after.png", before, after)
+    return {
+        "words": words,
+        "counts": counts,
+        "masked_task": masked_task,
+        "before": before,
+        "after": after,
+        "class_scores": scores,
+        "most_impacted": scores.sort_values("delta_f1").head(3),
+    }
+
+
+def explain_tokens(model: torch.nn.Module, vocab: dict[str, int], text: str, max_len: int, pred_class: int) -> pd.DataFrame:
+    tokens = tokenize(text)[:max_len]
+    ids = [vocab.get(token, 1) for token in tokens]
+    x = torch.tensor([ids + [0] * (max_len - len(ids))], dtype=torch.long)
+    model.eval()
+    with torch.no_grad():
+        full_score = torch.softmax(model(x), dim=1)[0, pred_class].item()
+        rows = []
+        for pos, token in enumerate(tokens):
+            occluded = x.clone()
+            occluded[0, pos] = 0
+            score = torch.softmax(model(occluded), dim=1)[0, pred_class].item()
+            rows.append({"token": token, "position": pos, "contribution": full_score - score})
+    return pd.DataFrame(rows)
+
+
+def plot_explanation(path: Path, title: str, contributions: pd.DataFrame) -> None:
+    visible = contributions.reindex(contributions["contribution"].abs().sort_values(ascending=False).index).head(25)
+    visible = visible.sort_values("contribution")
+    colors = ["#b91c1c" if value < 0 else "#047857" for value in visible["contribution"]]
+    labels = [f"{row.token} ({row.position})" for row in visible.itertuples()]
+    plt.figure(figsize=(8, max(4.8, 0.28 * len(visible))))
+    plt.barh(labels, visible["contribution"], color=colors)
+    plt.axvline(0, color="black", linewidth=0.8)
+    plt.title(title)
+    plt.xlabel("Baisse de probabilite quand le token est masque")
+    plt.tight_layout()
+    plt.savefig(path, dpi=160)
+    plt.close()
+
+
+def case_comment(contrib: pd.DataFrame, actual: str, predicted: str) -> list[str]:
+    top_pos = contrib.sort_values("contribution", ascending=False).head(4)["token"].tolist()
+    top_neg = contrib.sort_values("contribution", ascending=True).head(3)["token"].tolist()
+    return [
+        f"Le modele retient surtout {', '.join(top_pos)} pour choisir `{predicted}`.",
+        f"Il laisse peu peser {', '.join(top_neg)}, alors qu'un humain lirait aussi le contexte complet.",
+        f"Ce cas montre que le dataset associe des mots descriptifs courts a `{actual}`/`{predicted}`, pas une comprehension robuste de la scene.",
+    ]
+
+
+def compute_phase9(task: dict[str, object], phase8: dict[str, object]) -> dict[str, object]:
+    final = phase8["after"]
+    test_loader = make_loader(final["data"]["x_test"], final["data"]["y_test_tensor"], 128, False)
+    logits = predict_logits(final["model"], test_loader)
+    probs = torch.softmax(logits, dim=1).numpy()
+    y_true = final["data"]["test_y"]
+    y_pred = probs.argmax(axis=1)
+    margins = np.sort(probs, axis=1)[:, -1] - np.sort(probs, axis=1)[:, -2]
+    test_rows_original = subset(task, "test").reset_index(drop=True)
+    test_rows_masked = subset(phase8["masked_task"], "test").reset_index(drop=True)
+
+    choices = {
+        "correct": int(np.where(y_pred == y_true)[0][0]),
+        "wrong": int(np.where(y_pred != y_true)[0][0]),
+        "hesitant": int(np.argsort(margins)[0]),
+    }
+    paths = {
+        "correct": OUTPUT_DIR / "phase9_correct.png",
+        "wrong": OUTPUT_DIR / "phase9_wrong.png",
+        "hesitant": OUTPUT_DIR / "phase9_hesitant.png",
+    }
+    cases = {}
+    for name, pos in choices.items():
+        top2 = probs[pos].argsort()[-2:][::-1]
+        contrib = explain_tokens(
+            final["model"],
+            final["data"]["vocab"],
+            test_rows_masked.loc[pos, "comments_clean"],
+            final["config"]["max_len"],
+            int(y_pred[pos]),
+        )
+        actual = task["classes"][int(y_true[pos])]
+        predicted = task["classes"][int(y_pred[pos])]
+        plot_explanation(paths[name], f"Phase 9 - {name}: {predicted}", contrib)
+        row = test_rows_original.loc[pos]
+        cases[name] = {
+            "source_index": int(row["row_id"]),
+            "datetime": str(row["datetime"]),
+            "city": str(row["city"]),
+            "actual": actual,
+            "predicted": predicted,
+            "top2": [(task["classes"][int(i)], float(probs[pos, i])) for i in top2],
+            "margin": float(margins[pos]),
+            "comments": str(row["comments_clean"]),
+            "masked_comments": str(test_rows_masked.loc[pos, "comments_clean"]),
+            "contributions": contrib,
+            "top_words": contrib.sort_values("contribution", ascending=False).head(5)["token"].tolist(),
+            "comment": case_comment(contrib, actual, predicted),
+            "path": paths[name],
+        }
+    return {"cases": cases, "method": "occlusion leave-one-token-out sur la probabilite de la classe predite"}
+
+
 def append_report(task: dict[str, object], phase3: dict[str, object], phase4: dict[str, object], phase5: dict[str, object]) -> None:
     audit = task["audit"]
     classes = ", ".join(task["classes"])
@@ -904,6 +1277,126 @@ La comparaison temporelle est enregistree dans `outputs/phase5_time_comparison.p
     path.write_text(text, encoding="utf-8")
 
 
+def append_report_phases_6_to_9(
+    task: dict[str, object],
+    phase6: dict[str, object],
+    phase7: dict[str, object],
+    phase8: dict[str, object],
+    phase9: dict[str, object],
+) -> None:
+    rf_table = "\n".join(
+        f"| {r['couche']} | {r['kernel']} | {r['dilation']} | {r['stride']} | {r['champ_ajoute']} | {r['champ_cumule']} |"
+        for r in phase6["rf_rows"]
+    )
+    words = ", ".join(phase8["words"])
+    impacted = "\n".join(
+        f"| {row.classe} | {row.f1_avant:.4f} | {row.f1_apres:.4f} | {row.delta_f1:+.4f} |"
+        for row in phase8["most_impacted"].itertuples()
+    )
+    focus_rows = phase8["class_scores"][phase8["class_scores"]["classe"].isin(["light", "triangle", "circle"])]
+    focus = "\n".join(
+        f"| {row.classe} | {row.precision_avant:.4f} | {row.recall_avant:.4f} | {row.f1_avant:.4f} | {row.precision_apres:.4f} | {row.recall_apres:.4f} | {row.f1_apres:.4f} |"
+        for row in focus_rows.itertuples()
+    )
+    cases_md = []
+    for name, case in phase9["cases"].items():
+        top2 = ", ".join(f"{label}={prob:.3f}" for label, prob in case["top2"])
+        comments = "\n".join(f"- {line}" for line in case["comment"])
+        cases_md.append(
+            f"""### {name}
+- index original : {case['source_index']}
+- datetime : {case['datetime']}
+- city : {case['city']}
+- vraie shape : {case['actual']}
+- shape predite : {case['predicted']}
+- top2 : {top2}
+- marge top1-top2 : {case['margin']:.4f}
+- temoignage : `{case['comments']}`
+- temoignage masque lu par le modele : `{case['masked_comments']}`
+- mots les plus influents : {', '.join(case['top_words'])}
+{comments}
+- figure : `{case['path']}`
+"""
+        )
+    section = f"""
+
+## Phase 6 — Le champ de vision du modèle
+
+- longueur max avant troncature : {phase6['stats']['max_tokens_before_truncation']} tokens
+- longueur mediane : {phase6['stats']['median_tokens']:.1f} tokens
+- `max_len` accepte : {phase6['conv']['config']['max_len']} tokens, ce qui couvre {phase6['stats']['pct_covered_by_60'] * 100:.1f} % des textes supervises
+- architecture : `Embedding -> projection -> Conv1d dilatees residuelles + BatchNorm -> pooling masque -> MLP`
+
+| couche | kernel | dilation | stride | champ ajoute | champ cumule |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+{rf_table}
+
+Le champ receptif final vaut {phase6['rf_rows'][-1]['champ_cumule']} tokens, donc il couvre le `max_len` de {phase6['conv']['config']['max_len']}. Avant entrainement, j'ai modifie le premier token d'un vrai releve : `{phase6['probe']['token_original']}` vers `{phase6['probe']['token_modified']}`. L'ecart max absolu des logits vaut {phase6['probe']['logit_max_abs']:.6f}, donc la sortie change deja avec des poids identiques.
+
+| modele | accuracy | macro-F1 | temps |
+| --- | ---: | ---: | ---: |
+| reference Phase 3/5 | {phase6['reference']['accuracy']:.4f} | {phase6['reference']['macro_f1']:.4f} | {phase6['reference']['train_time']:.2f}s |
+| convolution Phase 6 | {phase6['conv']['accuracy']:.4f} | {phase6['conv']['macro_f1']:.4f} | {phase6['conv']['train_time']:.2f}s |
+
+La courbe est `outputs/phase6_train_val_loss.png`, le tableau est `outputs/phase6_receptive_field.csv`.
+
+## Phase 7 — Quatre relevés à la fois
+
+Le modele Phase 6 contenait `BatchNorm1d`. Avec un batch de 4, ses statistiques dependent fortement des trois autres releves places dans le meme lot. J'ai corrige le modele avec `GroupNorm`, qui normalise les canaux de chaque releve independamment des autres exemples. La prediction d'un releve ne doit pas dependre des autres releves du batch.
+
+Pour garder un temps raisonnable, les deux experiences en batch 4 sont plafonnees a {phase7['old_batch4']['config'].get('max_train_batches')} lots par epoque. Le batch utilise par le modele reste bien 4.
+
+| experience | accuracy | macro-F1 | temps |
+| --- | ---: | ---: | ---: |
+| ancien BatchNorm, batch=4 | {phase7['old_batch4']['accuracy']:.4f} | {phase7['old_batch4']['macro_f1']:.4f} | {phase7['old_batch4']['train_time']:.2f}s |
+| corrige GroupNorm, batch=4 | {phase7['fixed_batch4']['accuracy']:.4f} | {phase7['fixed_batch4']['macro_f1']:.4f} | {phase7['fixed_batch4']['train_time']:.2f}s |
+| corrige GroupNorm, batch normal | {phase7['fixed_normal']['accuracy']:.4f} | {phase7['fixed_normal']['macro_f1']:.4f} | {phase7['fixed_normal']['train_time']:.2f}s |
+
+Inference batch=1 : {'OUI' if phase7['batch1_ok'] else 'NON'}. Figure : `outputs/phase7_batch4_comparison.png`.
+
+## Phase 8 — Le Conseil a lu trois relevés
+
+Liste interdite construite depuis les classes retenues et les fusions connues : {words}.
+
+Politique : je remplace les mots par `<MASKSHAPE>`. Le token garde l'information qu'un mot interdit etait present, mais interdit la recopie directe du nom de classe. Le remplacement utilise des bornes de mots, donc `light` ne coupe pas un mot plus long.
+
+- releves avec mot interdit avant traitement : {phase8['counts']['before']}
+- releves avec mot interdit apres traitement : {phase8['counts']['after']}
+
+| modele | accuracy | macro-F1 |
+| --- | ---: | ---: |
+| avant interdiction | {phase8['before']['accuracy']:.4f} | {phase8['before']['macro_f1']:.4f} |
+| apres interdiction | {phase8['after']['accuracy']:.4f} | {phase8['after']['macro_f1']:.4f} |
+
+Classes chutant le plus :
+
+| classe | F1 avant | F1 apres | delta |
+| --- | ---: | ---: | ---: |
+{impacted}
+
+Comparaison demandee :
+
+| classe | precision avant | recall avant | F1 avant | precision apres | recall apres | F1 apres |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+{focus}
+
+Le macro-F1 chute plus directement que l'accuracy quand les petites classes perdent leurs indices lexicaux. L'accuracy reste dominee par les classes frequentes, alors que le macro-F1 donne le meme poids moyen a chaque classe.
+
+Fichiers : `outputs/phase8_class_scores.csv`, `outputs/phase8_before_after.png`.
+
+## Phase 9 — Rendre des comptes sur trois décisions
+
+Methode : {phase9['method']}. Pour chaque token, je masque seulement ce token et je mesure la baisse de probabilite de la classe predite.
+
+{''.join(cases_md)}
+"""
+    path = Path("RAPPORT.md")
+    text = path.read_text(encoding="utf-8")
+    marker = "\n## Phase 6 — Le champ de vision du modèle"
+    text = text.split(marker)[0].rstrip() + section
+    path.write_text(text, encoding="utf-8")
+
+
 def print_phase3_to_5(task: dict[str, object], phase3: dict[str, object], phase4: dict[str, object], phase5: dict[str, object]) -> None:
     audit = task["audit"]
     print("\n=== PHASE 3 - BATTRE LE SERVICE STATISTIQUE ===")
@@ -934,24 +1427,121 @@ def print_phase3_to_5(task: dict[str, object], phase3: dict[str, object], phase4
     print(pd.DataFrame([{k: v for k, v in e.items() if k != "config"} for e in phase5["experiments"]]).to_string(index=False))
 
 
+def print_phase6_to_9(phase6: dict[str, object], phase7: dict[str, object], phase8: dict[str, object], phase9: dict[str, object]) -> None:
+    print("\n=== PHASE 6 - LE CHAMP DE VISION DU MODELE ===")
+    print(
+        f"Longueur max={phase6['stats']['max_tokens_before_truncation']} | "
+        f"mediane={phase6['stats']['median_tokens']:.1f} | "
+        f"max_len={phase6['conv']['config']['max_len']}"
+    )
+    print(pd.DataFrame(phase6["rf_rows"]).to_string(index=False))
+    print(
+        f"Token debut: {phase6['probe']['token_original']} -> {phase6['probe']['token_modified']} | "
+        f"max diff logits={phase6['probe']['logit_max_abs']:.6f}"
+    )
+    print(
+        f"Phase 6: accuracy={phase6['conv']['accuracy']:.4f} | "
+        f"macro-F1={phase6['conv']['macro_f1']:.4f} | temps={phase6['conv']['train_time']:.2f}s"
+    )
+
+    print("\n=== PHASE 7 - QUATRE RELEVES A LA FOIS ===")
+    print(
+        f"Ancien batch=4: accuracy={phase7['old_batch4']['accuracy']:.4f} | "
+        f"macro-F1={phase7['old_batch4']['macro_f1']:.4f}"
+    )
+    print(
+        f"Corrige GroupNorm batch=4: accuracy={phase7['fixed_batch4']['accuracy']:.4f} | "
+        f"macro-F1={phase7['fixed_batch4']['macro_f1']:.4f}"
+    )
+    print(
+        f"Corrige GroupNorm batch normal: accuracy={phase7['fixed_normal']['accuracy']:.4f} | "
+        f"macro-F1={phase7['fixed_normal']['macro_f1']:.4f}"
+    )
+    print(f"Inference batch=1 reussie: {'OUI' if phase7['batch1_ok'] else 'NON'}")
+
+    print("\n=== PHASE 8 - INTERDIRE LES MOTS DE FORME ===")
+    print(f"Liste interdite ({len(phase8['words'])} mots): {', '.join(phase8['words'])}")
+    print(
+        f"Avant={phase8['counts']['before']} releves avec mot interdit | "
+        f"apres={phase8['counts']['after']}"
+    )
+    print(
+        f"Avant: accuracy={phase8['before']['accuracy']:.4f}, macro-F1={phase8['before']['macro_f1']:.4f} | "
+        f"Apres: accuracy={phase8['after']['accuracy']:.4f}, macro-F1={phase8['after']['macro_f1']:.4f}"
+    )
+    print("Classes chutant le plus:")
+    print(phase8["most_impacted"][["classe", "f1_avant", "f1_apres", "delta_f1"]].to_string(index=False))
+
+    print("\n=== PHASE 9 - EXPLIQUER TROIS DECISIONS ===")
+    for name, case in phase9["cases"].items():
+        print(
+            f"{name}: index={case['source_index']} | {case['actual']} -> {case['predicted']} | "
+            f"top mots={', '.join(case['top_words'])}"
+        )
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Bureau d'analyse terrestre")
+    parser.add_argument("--phase", choices=["6", "7", "8", "9"], help="executer rapidement une phase 6-9")
+    return parser.parse_args()
+
+
+def run_late_phases(task: dict[str, object], phase3: dict[str, object] | None = None, phase5: dict[str, object] | None = None) -> tuple[dict[str, object], dict[str, object], dict[str, object], dict[str, object]]:
+    phase6 = compute_phase6(task, phase3, phase5)
+    phase7 = compute_phase7(task, phase6)
+    phase8 = compute_phase8(task, phase7)
+    phase9 = compute_phase9(task, phase8)
+    return phase6, phase7, phase8, phase9
+
+
 def main() -> None:
+    args = parse_args()
     download_dataset()
     raw_df, load_report = load_dataset()
     df = prepare_dates(raw_df)
+    shape_task = prepare_shape_task(df, load_report)
+
+    if args.phase:
+        phase6 = compute_phase6(shape_task)
+        if args.phase == "6":
+            print("\n=== PHASE 6 - LE CHAMP DE VISION DU MODELE ===")
+            print(pd.DataFrame(phase6["rf_rows"]).to_string(index=False))
+            print(f"accuracy={phase6['conv']['accuracy']:.4f} | macro-F1={phase6['conv']['macro_f1']:.4f}")
+            return
+        phase7 = compute_phase7(shape_task, phase6)
+        if args.phase == "7":
+            print("\n=== PHASE 7 - QUATRE RELEVES A LA FOIS ===")
+            print(f"ancien batch4 macro-F1={phase7['old_batch4']['macro_f1']:.4f}")
+            print(f"corrige batch4 macro-F1={phase7['fixed_batch4']['macro_f1']:.4f}")
+            print(f"batch1 OK={'OUI' if phase7['batch1_ok'] else 'NON'}")
+            return
+        phase8 = compute_phase8(shape_task, phase7)
+        if args.phase == "8":
+            print("\n=== PHASE 8 - INTERDIRE LES MOTS DE FORME ===")
+            print(f"remaining_forbidden={phase8['counts']['after']}")
+            print(f"apres macro-F1={phase8['after']['macro_f1']:.4f}")
+            return
+        phase9 = compute_phase9(shape_task, phase8)
+        print_phase6_to_9(phase6, phase7, phase8, phase9)
+        print(f"\nPhase demandee terminee: {args.phase}")
+        return
+
     full = compute_phase0(df, None, None)
     selected = compute_phase0(df, 1990, 2014)
     compute_phase1(selected["df"])
     phase2 = compute_phase2(df)
-    shape_task = prepare_shape_task(df, load_report)
     phase3 = compute_phase3(shape_task)
     phase4 = compute_phase4(shape_task, phase3)
     phase5 = compute_phase5(shape_task, phase3)
+    phase6, phase7, phase8, phase9 = run_late_phases(shape_task, phase3, phase5)
 
     save_outputs(selected)
     append_report(shape_task, phase3, phase4, phase5)
+    append_report_phases_6_to_9(shape_task, phase6, phase7, phase8, phase9)
     print_phase0(load_report, full, selected)
     print_phase2(phase2)
     print_phase3_to_5(shape_task, phase3, phase4, phase5)
+    print_phase6_to_9(phase6, phase7, phase8, phase9)
     print("\nSorties generees:")
     print(f"- {OUTPUT_DIR / 'phase0_top10_journees.csv'}")
     print(f"- {OUTPUT_DIR / 'phase0_volume_annuel.png'}")
@@ -962,6 +1552,14 @@ def main() -> None:
     print(f"- {OUTPUT_DIR / 'phase4_panne3.png'}")
     print(f"- {OUTPUT_DIR / 'phase5_time_comparison.png'}")
     print(f"- {OUTPUT_DIR / 'phase5_experiments.csv'}")
+    print(f"- {OUTPUT_DIR / 'phase6_receptive_field.csv'}")
+    print(f"- {OUTPUT_DIR / 'phase6_train_val_loss.png'}")
+    print(f"- {OUTPUT_DIR / 'phase7_batch4_comparison.png'}")
+    print(f"- {OUTPUT_DIR / 'phase8_class_scores.csv'}")
+    print(f"- {OUTPUT_DIR / 'phase8_before_after.png'}")
+    print(f"- {OUTPUT_DIR / 'phase9_correct.png'}")
+    print(f"- {OUTPUT_DIR / 'phase9_wrong.png'}")
+    print(f"- {OUTPUT_DIR / 'phase9_hesitant.png'}")
 
 
 if __name__ == "__main__":
