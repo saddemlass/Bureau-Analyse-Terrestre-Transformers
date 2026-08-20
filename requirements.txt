@@ -3,3 +3,7 @@ numpy
 matplotlib
 scikit-learn
 torch
+transformers<5
+tokenizers
+peft
+psutil

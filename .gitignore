@@ -8,3 +8,5 @@ releves_klaxo3.csv.tmp
 outputs/*.tmp
 outputs/*.partial
 outputs/.matplotlib/
+
+checkpoints/

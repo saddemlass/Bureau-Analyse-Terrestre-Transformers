@@ -430,3 +430,31 @@ Une tete correspond a une famille de projections `Q/K/V`. Ici, deux tetes manuel
 - figure : `outputs/phase13_two_heads.png`
 
 Ces poids ne sont pas entraines : les deux projections produisent des patrons d'attention differents, mais on ne peut pas attribuer un role linguistique reel aux tetes.
+
+## Phase 14 — Le cerveau emprunté, et sa facture
+
+### Reference
+Phase 8, meme split, vocabulaire formes interdit. Reference historique : accuracy=0.3458, macro-F1=0.0944.
+
+### Modele emprunte
+`prajjwal1/bert-tiny` est retenu car il est tres petit : 4385920 parametres encodeur, 2 couches, 128 dimensions cachees. Longueur retenue : 64, avec padding dynamique.
+
+### Regime 1 — gele
+L'encodeur BERT ne bouge pas ; seule la tete lineaire de classification est entrainee.
+
+### Regime 2 — fine-tuning partiel
+Les embeddings et la premiere couche restent geles ; seule la derniere couche Transformer et la tete bougent. La derniere couche utilise lr=2e-05, la tete lr=0.0003 pour adapter plus vite la sortie que l'entree.
+
+### Regime 3 — LoRA
+LoRA realise : r=4, alpha=8, dropout=0.05, modules=query,value.
+
+| Regime | Macro-F1 | Accuracy | Parametres modifies | Step | Memoire | Sauvegarde |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| frozen | 0.0327 | 0.2499 | 2451 | 117.3 ms | 691.2 MiB | 0.01 MiB |
+| partial | 0.0672 | 0.3018 | 200723 | 163.5 ms | 277.7 MiB | 0.77 MiB |
+| lora | 0.1281 | 0.3420 | 6547 | 204.5 ms | 283.1 MiB | 0.03 MiB |
+
+Le Bureau peut se payer lora parce qu'il combine score et cout : il donne macro-F1=0.1281 avec 6547 parametres modifies et 0.03 MiB a sauvegarder.
+
+Fichiers : `outputs/phase14_regimes.csv`, `outputs/phase14_score_cost.png`.
+

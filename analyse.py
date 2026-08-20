@@ -7,6 +7,7 @@ import re
 import time
 import urllib.error
 import urllib.request
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -42,6 +43,15 @@ from training import (
     predict_logits,
     set_seeds,
     train_model,
+)
+
+from pretrained import (
+    MODEL_NAME,
+    choose_max_length,
+    make_loaders as make_pretrained_loaders,
+    model_metadata,
+    run_regime,
+    tokenizer_audit,
 )
 
 
@@ -1112,6 +1122,194 @@ def compute_phase8(task: dict[str, object], phase7: dict[str, object]) -> dict[s
     }
 
 
+def phase8_reference_from_report(path: Path = Path("RAPPORT.md")) -> dict[str, float] | None:
+    if not path.exists():
+        return None
+    text = path.read_text(encoding="utf-8", errors="replace")
+    section = text.split("## Phase 8", 1)
+    if len(section) < 2:
+        return None
+    body = section[1].split("## Phase 9", 1)[0]
+    match = re.search(r"\|\s*apres interdiction\s*\|\s*([0-9.]+)\s*\|\s*([0-9.]+)\s*\|", body)
+    if not match:
+        return None
+    return {"accuracy": float(match.group(1)), "macro_f1": float(match.group(2))}
+
+
+def phase14_splits(masked_task: dict[str, object]) -> dict[str, tuple[list[str], list[int]]]:
+    splits = {}
+    for split in ["train", "val", "test"]:
+        rows = subset(masked_task, split)
+        splits[split] = (rows["comments_clean"].astype(str).tolist(), rows["y"].astype(int).tolist())
+    return splits
+
+
+def plot_phase14_score_cost(rows: list[dict[str, object]], path: Path) -> None:
+    visible = [row for row in rows if row["regime"] != "phase8_reference"]
+    plt.figure(figsize=(7, 4.8))
+    for row in visible:
+        plt.scatter(row["trainable_parameters"], row["macro_f1"], s=70)
+        plt.annotate(str(row["regime"]), (row["trainable_parameters"], row["macro_f1"]), xytext=(6, 5), textcoords="offset points")
+    plt.xscale("log")
+    plt.xlabel("Parametres entrainables")
+    plt.ylabel("Macro-F1 test")
+    plt.title("Phase 14 - Score / cout")
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(path, dpi=160)
+    plt.close()
+
+
+def append_report_phase14(result: dict[str, object]) -> None:
+    rows = result["rows"]
+
+    def fmt(value: object, suffix: str = "") -> str:
+        if value == "NA" or pd.isna(value):
+            return "NA"
+        if isinstance(value, float):
+            return f"{value:.4f}{suffix}" if suffix == "" else f"{value:.1f}{suffix}"
+        return str(value)
+
+    table = "\n".join(
+        "| {regime} | {macro_f1:.4f} | {accuracy:.4f} | {trainable_parameters} | {training_step_ms:.1f} ms | {peak_memory_mib:.1f} MiB | {saved_artifact_mib:.2f} MiB |".format(**row)
+        for row in rows
+        if row["regime"] != "phase8_reference"
+    )
+    reference = result["phase8_reference"]
+    lora = result["lora_status"]
+    section = f"""
+
+## Phase 14 — Le cerveau emprunté, et sa facture
+
+### Reference
+Phase 8, meme split, vocabulaire formes interdit. Reference historique : accuracy={reference['accuracy']:.4f}, macro-F1={reference['macro_f1']:.4f}.
+
+### Modele emprunte
+`{result['model']['model_name']}` est retenu car il est tres petit : {result['model']['total_parameters']} parametres encodeur, {result['model']['num_hidden_layers']} couches, {result['model']['hidden_size']} dimensions cachees. Longueur retenue : {result['max_length']}, avec padding dynamique.
+
+### Regime 1 — gele
+L'encodeur BERT ne bouge pas ; seule la tete lineaire de classification est entrainee.
+
+### Regime 2 — fine-tuning partiel
+Les embeddings et la premiere couche restent geles ; seule la derniere couche Transformer et la tete bougent. La derniere couche utilise lr={result['partial_lrs']['last_layer_lr']}, la tete lr={result['partial_lrs']['head_lr']} pour adapter plus vite la sortie que l'entree.
+
+### Regime 3 — LoRA
+{lora}
+
+| Regime | Macro-F1 | Accuracy | Parametres modifies | Step | Memoire | Sauvegarde |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+{table}
+
+Le Bureau peut se payer {result['recommendation']['regime']} parce qu'il combine score et cout : {result['recommendation']['reason']}.
+
+Fichiers : `outputs/phase14_regimes.csv`, `outputs/phase14_score_cost.png`.
+"""
+    report = Path("RAPPORT.md")
+    text = report.read_text(encoding="utf-8", errors="replace") if report.exists() else ""
+    marker = "\n## Phase 14 "
+    if marker in text:
+        text = text.split(marker)[0].rstrip() + section
+    else:
+        text = text.rstrip() + section
+    report.write_text(text + "\n", encoding="utf-8")
+
+
+def compute_phase14(task: dict[str, object]) -> dict[str, object]:
+    start = time.perf_counter()
+    words = forbidden_shape_words(task["classes"])
+    masked_task, counts = masked_shape_task(task, words)
+    assert len(masked_task["data"]) == task["audit"]["kept"]
+    assert len(task["classes"]) == 19
+    assert np.array_equal(task["train_idx"], masked_task["train_idx"])
+    assert np.array_equal(task["val_idx"], masked_task["val_idx"])
+    assert np.array_equal(task["test_idx"], masked_task["test_idx"])
+    assert counts["after"] == 0
+
+    phase8_reference = phase8_reference_from_report()
+    if phase8_reference is None:
+        raise RuntimeError("Reference Phase 8 introuvable dans RAPPORT.md; Phase 14 ne doit pas reentrainer Phase 8.")
+
+    meta = model_metadata(MODEL_NAME)
+    tokenizer = meta.pop("tokenizer")
+    splits = phase14_splits(masked_task)
+    all_texts = [text for split in splits.values() for text in split[0]]
+    length_stats = tokenizer_audit(all_texts, tokenizer)
+    max_length = choose_max_length(length_stats)
+    loaders = make_pretrained_loaders(splits, tokenizer, max_length=max_length, batch_size=64)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    checkpoint_root = Path("checkpoints") / "phase14"
+    checkpoint_root.mkdir(parents=True, exist_ok=True)
+
+    measured = []
+    for regime in ["frozen", "partial"]:
+        measured.append(run_regime(regime, loaders, device, len(task["classes"]), checkpoint_root))
+
+    lora_status = "LoRA non realise : dependance PEFT indisponible ou echec technique."
+    try:
+        measured.append(run_regime("lora", loaders, device, len(task["classes"]), checkpoint_root))
+        lora_result = measured[-1]
+        lora_status = (
+            "LoRA realise : r={r}, alpha={alpha}, dropout={dropout}, modules={target_modules}.".format(
+                **lora_result.details
+            )
+        )
+    except Exception as exc:
+        lora_status = f"LoRA non realise : {type(exc).__name__}: {exc}"
+
+    rows: list[dict[str, object]] = [
+        {
+            "regime": "phase8_reference",
+            "model_name": "reseau_maison_phase8",
+            "accuracy": phase8_reference["accuracy"],
+            "macro_f1": phase8_reference["macro_f1"],
+            "total_parameters": "NA",
+            "trainable_parameters": "NA",
+            "trainable_percent": "NA",
+            "training_step_ms": "NA",
+            "training_total_s": "NA",
+            "peak_memory_mib": "NA",
+            "saved_artifact_mib": "NA",
+        }
+    ]
+    rows.extend([r.__dict__ | {"details": json.dumps(r.details, sort_keys=True)} for r in measured])
+    csv_rows = [{k: v for k, v in row.items() if k != "details"} for row in rows]
+    pd.DataFrame(csv_rows).to_csv(OUTPUT_DIR / "phase14_regimes.csv", index=False)
+    plot_phase14_score_cost(csv_rows, OUTPUT_DIR / "phase14_score_cost.png")
+
+    candidates = sorted(
+        measured,
+        key=lambda r: (r.macro_f1 - 0.000002 * r.trainable_parameters - 0.0005 * r.saved_artifact_mib),
+        reverse=True,
+    )
+    chosen = candidates[0]
+    recommendation = {
+        "regime": chosen.regime,
+        "reason": (
+            f"il donne macro-F1={chosen.macro_f1:.4f} avec {chosen.trainable_parameters} parametres modifies "
+            f"et {chosen.saved_artifact_mib:.2f} MiB a sauvegarder"
+        ),
+    }
+    result = {
+        "dataset_rows": len(masked_task["data"]),
+        "classes": task["classes"],
+        "split": {"train": len(task["train_idx"]), "val": len(task["val_idx"]), "test": len(task["test_idx"])},
+        "remaining_forbidden": counts["after"],
+        "model": meta,
+        "device": str(device),
+        "length_stats": length_stats,
+        "max_length": max_length,
+        "phase8_reference": phase8_reference,
+        "regimes": measured,
+        "rows": csv_rows,
+        "lora_status": lora_status,
+        "partial_lrs": next(r.details["learning_rates"] for r in measured if r.regime == "partial"),
+        "recommendation": recommendation,
+        "elapsed_s": time.perf_counter() - start,
+    }
+    append_report_phase14(result)
+    return result
+
+
 def explain_tokens(model: torch.nn.Module, vocab: dict[str, int], text: str, max_len: int, pred_class: int) -> pd.DataFrame:
     tokens = tokenize(text)[:max_len]
     ids = [vocab.get(token, 1) for token in tokens]
@@ -1980,7 +2178,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Bureau d'analyse terrestre")
     parser.add_argument(
         "--phase",
-        choices=["6", "7", "8", "9", "10", "11", "10-11", "12", "13", "12-13"],
+        choices=["6", "7", "8", "9", "10", "11", "10-11", "12", "13", "12-13", "14"],
         help="executer rapidement une phase ciblee",
     )
     return parser.parse_args()
@@ -2013,6 +2211,30 @@ def main() -> None:
         return
 
     shape_task = prepare_shape_task(df, load_report)
+
+    if args.phase == "14":
+        phase14 = compute_phase14(shape_task)
+        print("\n=== PHASE 14 - LE CERVEAU EMPRUNTE, ET SA FACTURE ===")
+        print(f"lignes={phase14['dataset_rows']} | classes={len(phase14['classes'])} | split={phase14['split']}")
+        print(f"remaining_forbidden_words={phase14['remaining_forbidden']}")
+        print(
+            f"modele={phase14['model']['model_name']} | params={phase14['model']['total_parameters']} | "
+            f"architecture={phase14['model']['architecture']} layers={phase14['model']['num_hidden_layers']}"
+        )
+        print(f"device={phase14['device']}")
+        stats = phase14["length_stats"]
+        print(
+            f"longueurs tokenizer mediane={stats['median']:.1f} p95={stats['p95']:.1f} "
+            f"p99={stats['p99']:.1f} max={stats['max']} | max_length={phase14['max_length']}"
+        )
+        print(
+            f"Reference Phase 8: accuracy={phase14['phase8_reference']['accuracy']:.4f} | "
+            f"macro-F1={phase14['phase8_reference']['macro_f1']:.4f}"
+        )
+        print(pd.DataFrame(phase14["rows"]).to_string(index=False))
+        print(f"Temps Phase 14 ciblee={phase14['elapsed_s']:.2f}s")
+        print(f"\nPhase demandee terminee: {args.phase}")
+        return
 
     if args.phase:
         phase6 = compute_phase6(shape_task)
