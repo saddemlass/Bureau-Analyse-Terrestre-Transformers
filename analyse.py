@@ -24,7 +24,14 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score
 from sklearn.model_selection import train_test_split
 
-from models import ConvTextClassifier, SingleHeadSelfAttention, TextClassifier, positional_encoding, receptive_field_table
+from models import (
+    ConvTextClassifier,
+    SingleHeadSelfAttention,
+    TextClassifier,
+    TwoHeadSelfAttention,
+    positional_encoding,
+    receptive_field_table,
+)
 from training import (
     build_vocab,
     class_scores,
@@ -1449,6 +1456,245 @@ def run_phase10_to_11(df: pd.DataFrame) -> tuple[dict[str, object], dict[str, ob
     return phase10, phase11, elapsed
 
 
+def compute_phase12() -> dict[str, object]:
+    device = torch.device("cpu")
+    embedding_dim = 32
+    lengths = [16, 32, 64, 128, 256, 512]
+    torch.manual_seed(1212)
+    head = SingleHeadSelfAttention(embedding_dim).to(device).eval()
+    rows = []
+
+    for seq_len in lengths:
+        generator = torch.Generator(device=device).manual_seed(1200 + seq_len)
+        x = torch.randn(seq_len, embedding_dim, generator=generator, device=device)
+        with torch.no_grad():
+            for _ in range(5):
+                result = head(x)
+            assert tuple(result["weights"].shape) == (seq_len, seq_len)
+
+            timings = []
+            for _ in range(30):
+                start = time.perf_counter()
+                result = head(x)
+                timings.append((time.perf_counter() - start) * 1000)
+
+        cells = seq_len * seq_len
+        rows.append(
+            {
+                "seq_len": seq_len,
+                "median_time_ms": float(np.median(timings)),
+                "attention_cells": cells,
+                "attention_memory_mib": cells * 4 / (1024**2),
+            }
+        )
+
+    table = pd.DataFrame(rows)
+    table.to_csv(OUTPUT_DIR / "phase12_attention_scaling.csv", index=False)
+
+    fig, ax1 = plt.subplots(figsize=(8, 5))
+    ax1.plot(table["seq_len"], table["median_time_ms"], marker="o", label="temps median")
+    ax1.set_xlabel("Longueur de sequence n")
+    ax1.set_ylabel("Temps median attention (ms)")
+    ax1.grid(True, alpha=0.25)
+    ax2 = ax1.twinx()
+    ax2.plot(table["seq_len"], table["attention_cells"], color="tab:orange", linestyle="--", label="n^2")
+    ax2.set_ylabel("Coefficients attention n^2")
+    lines = ax1.get_lines() + ax2.get_lines()
+    ax1.legend(lines, [line.get_label() for line in lines], loc="upper left")
+    fig.tight_layout()
+    fig.savefig(OUTPUT_DIR / "phase12_attention_scaling.png", dpi=170)
+    plt.close(fig)
+
+    time_ratios = [
+        {
+            "from": int(table.loc[i - 1, "seq_len"]),
+            "to": int(table.loc[i, "seq_len"]),
+            "time_ratio": float(table.loc[i, "median_time_ms"] / table.loc[i - 1, "median_time_ms"]),
+            "cell_ratio": float(table.loc[i, "attention_cells"] / table.loc[i - 1, "attention_cells"]),
+        }
+        for i in range(1, len(table))
+    ]
+    alpha = float(np.polyfit(np.log(table["seq_len"]), np.log(table["median_time_ms"]), 1)[0])
+    return {
+        "device": str(device),
+        "embedding_dim": embedding_dim,
+        "lengths": lengths,
+        "table": table,
+        "ratios": time_ratios,
+        "alpha": alpha,
+        "figure": OUTPUT_DIR / "phase12_attention_scaling.png",
+        "csv": OUTPUT_DIR / "phase12_attention_scaling.csv",
+    }
+
+
+def assert_two_head_attention(result: dict[str, object], x: torch.Tensor) -> dict[str, object]:
+    seq_len = x.shape[0]
+    checks = {}
+    for name in ["head1", "head2"]:
+        head = result[name]
+        assert isinstance(head, dict)
+        weights = head["weights"]
+        output = head["output"]
+        assert tuple(weights.shape) == (seq_len, seq_len), f"{name} weights incorrect: {tuple(weights.shape)}"
+        assert tuple(output.shape) == (seq_len, x.shape[1] // 2), f"{name} output incorrect: {tuple(output.shape)}"
+        row_sums = weights.sum(dim=-1)
+        max_error = torch.max(torch.abs(row_sums - 1.0)).item()
+        assert max_error < 1e-6, f"{name} lignes hors tolerance: {max_error}"
+        checks[name] = float(max_error)
+    assert tuple(result["concat"].shape) == tuple(x.shape)
+    assert tuple(result["output"].shape) == tuple(x.shape)
+    return checks
+
+
+def compute_phase13(df: pd.DataFrame) -> dict[str, object]:
+    record = choose_phase10_record(df)
+    d_model = 32
+    emb = build_phase10_embeddings(record["tokens"], d_model)
+    torch.manual_seed(1313)
+    module = TwoHeadSelfAttention(d_model).eval()
+    with torch.no_grad():
+        result = module(emb["x"])
+    checks = assert_two_head_attention(result, emb["x"])
+    head1 = result["head1"]
+    head2 = result["head2"]
+    weights1 = head1["weights"]
+    weights2 = head2["weights"]
+    mean_abs_diff = torch.mean(torch.abs(weights1 - weights2)).item()
+    cosine = torch.nn.functional.cosine_similarity(weights1.flatten(), weights2.flatten(), dim=0).item()
+
+    pronoun_index = int(record["pronoun_index"])
+    top1 = int(torch.argmax(weights1[pronoun_index]).item())
+    top2 = int(torch.argmax(weights2[pronoun_index]).item())
+
+    vmax = max(float(weights1.max().item()), float(weights2.max().item()))
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+    for ax, weights, title in [
+        (axes[0], weights1, "Tete 1"),
+        (axes[1], weights2, "Tete 2"),
+    ]:
+        im = ax.imshow(weights.detach().numpy(), cmap="viridis", vmin=0.0, vmax=vmax)
+        ax.set_xticks(range(len(record["tokens"])))
+        ax.set_yticks(range(len(record["tokens"])))
+        ax.set_xticklabels(record["tokens"], rotation=70, ha="right", fontsize=7)
+        ax.set_yticklabels(record["tokens"], fontsize=7)
+        ax.set_title(title)
+        ax.set_xlabel("Tokens consultes")
+    axes[0].set_ylabel("Tokens qui posent la question")
+    fig.colorbar(im, ax=axes.ravel().tolist(), fraction=0.025, pad=0.03)
+    fig.suptitle("Phase 13 - Deux tetes d'attention manuelles")
+    fig.savefig(OUTPUT_DIR / "phase13_two_heads.png", dpi=170, bbox_inches="tight")
+    plt.close(fig)
+
+    return {
+        "record": record,
+        "x": emb["x"],
+        "module": module,
+        "result": result,
+        "checks": checks,
+        "d_model": d_model,
+        "num_heads": 2,
+        "head_dim": module.head_dim,
+        "mean_abs_diff": float(mean_abs_diff),
+        "cosine": float(cosine),
+        "pronoun_index": pronoun_index,
+        "top1_index": top1,
+        "top1_token": record["tokens"][top1],
+        "top1_weight": float(weights1[pronoun_index, top1].item()),
+        "top2_index": top2,
+        "top2_token": record["tokens"][top2],
+        "top2_weight": float(weights2[pronoun_index, top2].item()),
+        "figure": OUTPUT_DIR / "phase13_two_heads.png",
+    }
+
+
+def append_report_phases_12_to_13(phase12: dict[str, object], phase13: dict[str, object]) -> None:
+    table_rows = "\n".join(
+        f"| {int(row.seq_len)} | {row.median_time_ms:.6f} | {int(row.attention_cells)} | {row.attention_memory_mib:.6f} |"
+        for row in phase12["table"].itertuples()
+    )
+    ratio_rows = "\n".join(
+        f"| {r['from']} -> {r['to']} | {r['time_ratio']:.3f} | {r['cell_ratio']:.1f} |"
+        for r in phase12["ratios"]
+    )
+    record = phase13["record"]
+    result = phase13["result"]
+    section = f"""
+
+## Phase 12 — Le prix des regards
+
+Chaque token compare sa requete aux cles de tous les tokens. La matrice `weights` possede donc `n x n` coefficients : sa memoire croit en `O(n^2)`, et le produit `QK^T` augmente fortement avec la longueur. Le temps reel ne suit pas obligatoirement un facteur exact x4 a chaque doublement, car les petits tenseurs subissent l'overhead Python, le cache et la vectorisation.
+
+| seq_len | temps median ms | cellules attention | memoire MiB |
+|---:|---:|---:|---:|
+{table_rows}
+
+| doublement | ratio temps observe | ratio cellules |
+|---:|---:|---:|
+{ratio_rows}
+
+Diagnostic log-log `log(time) ~ alpha * log(n)` : alpha={phase12['alpha']:.3f}. Figure : `outputs/phase12_attention_scaling.png`. Donnees : `outputs/phase12_attention_scaling.csv`.
+
+## Phase 13 — Deux paires d'yeux
+
+Une tete correspond a une famille de projections `Q/K/V`. Ici, deux tetes manuelles possedent deux familles independantes et travaillent chacune dans un sous-espace de dimension 16. Leurs sorties `[n,16]` sont concatenees en `[n,32]`, puis `Wo` les reprojette vers `d_model=32`.
+
+- vrai releve : index {record['source_index']}, commentaire `{record['comments']}`
+- tokens : `{record['tokens']}`
+- dimensions : X={tuple(phase13['x'].shape)}, head1 output={tuple(result['head1']['output'].shape)}, head2 output={tuple(result['head2']['output'].shape)}, concat={tuple(result['concat'].shape)}, final={tuple(result['output'].shape)}
+- weights tete 1={tuple(result['head1']['weights'].shape)}, weights tete 2={tuple(result['head2']['weights'].shape)}
+- preuve lignes = 1 : erreur max tete 1={phase13['checks']['head1']:.8g}, erreur max tete 2={phase13['checks']['head2']:.8g}
+- difference moyenne absolue weights1/weights2 : {phase13['mean_abs_diff']:.8f}
+- similarite cosinus aplatie : {phase13['cosine']:.8f}
+- pronom : `{record['pronoun']}` ; tete 1 regarde surtout `{phase13['top1_token']}` poids={phase13['top1_weight']:.6f} ; tete 2 regarde surtout `{phase13['top2_token']}` poids={phase13['top2_weight']:.6f}
+- figure : `outputs/phase13_two_heads.png`
+
+Ces poids ne sont pas entraines : les deux projections produisent des patrons d'attention differents, mais on ne peut pas attribuer un role linguistique reel aux tetes.
+"""
+    path = Path("RAPPORT.md")
+    text = path.read_text(encoding="utf-8")
+    marker = "\n## Phase 12 — Le prix des regards"
+    text = text.split(marker)[0].rstrip() + section
+    path.write_text(text, encoding="utf-8")
+
+
+def print_phase12_to_13(phase12: dict[str, object], phase13: dict[str, object], elapsed: float) -> None:
+    result = phase13["result"]
+    record = phase13["record"]
+    print("\n=== PHASE 12 - LE PRIX DES REGARDS ===")
+    print(f"device={phase12['device']} | embedding_dim={phase12['embedding_dim']} | longueurs={phase12['lengths']}")
+    print(phase12["table"].to_string(index=False))
+    for ratio in phase12["ratios"]:
+        print(f"ratio {ratio['from']}->{ratio['to']}: temps={ratio['time_ratio']:.3f} | cellules={ratio['cell_ratio']:.1f}")
+    print(f"alpha_log_log={phase12['alpha']:.3f}")
+
+    print("\n=== PHASE 13 - DEUX PAIRES D'YEUX ===")
+    print(f"index={record['source_index']} | commentaire={record['comments']}")
+    print(f"tokens={record['tokens']}")
+    print(f"seq_len={len(record['tokens'])} | d_model={phase13['d_model']} | tetes=2 | head_dim={phase13['head_dim']}")
+    print(
+        f"X={tuple(phase13['x'].shape)} | out1={tuple(result['head1']['output'].shape)} | "
+        f"out2={tuple(result['head2']['output'].shape)} | concat={tuple(result['concat'].shape)} | "
+        f"final={tuple(result['output'].shape)}"
+    )
+    print(f"weights tete1={tuple(result['head1']['weights'].shape)} | weights tete2={tuple(result['head2']['weights'].shape)}")
+    print(f"erreur lignes tete1={phase13['checks']['head1']:.10g} | tete2={phase13['checks']['head2']:.10g}")
+    print(f"mean_abs_diff={phase13['mean_abs_diff']:.8f} | cosine={phase13['cosine']:.8f}")
+    print(
+        f"pronom={record['pronoun']} | tete1 top={phase13['top1_token']} ({phase13['top1_weight']:.6f}) | "
+        f"tete2 top={phase13['top2_token']} ({phase13['top2_weight']:.6f})"
+    )
+    print(f"temps phase 12-13={elapsed:.2f}s")
+
+
+def run_phase12_to_13(df: pd.DataFrame) -> tuple[dict[str, object], dict[str, object], float]:
+    start = time.perf_counter()
+    phase12 = compute_phase12()
+    phase13 = compute_phase13(df)
+    append_report_phases_12_to_13(phase12, phase13)
+    elapsed = time.perf_counter() - start
+    return phase12, phase13, elapsed
+
+
 def append_report(task: dict[str, object], phase3: dict[str, object], phase4: dict[str, object], phase5: dict[str, object]) -> None:
     audit = task["audit"]
     classes = ", ".join(task["classes"])
@@ -1732,7 +1978,11 @@ def print_phase6_to_9(phase6: dict[str, object], phase7: dict[str, object], phas
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Bureau d'analyse terrestre")
-    parser.add_argument("--phase", choices=["6", "7", "8", "9", "10", "11", "10-11"], help="executer rapidement une phase ciblee")
+    parser.add_argument(
+        "--phase",
+        choices=["6", "7", "8", "9", "10", "11", "10-11", "12", "13", "12-13"],
+        help="executer rapidement une phase ciblee",
+    )
     return parser.parse_args()
 
 
@@ -1753,6 +2003,12 @@ def main() -> None:
     if args.phase in {"10", "11", "10-11"}:
         phase10, phase11, elapsed = run_phase10_to_11(df)
         print_phase10_to_11(phase10, phase11, elapsed)
+        print(f"\nPhase demandee terminee: {args.phase}")
+        return
+
+    if args.phase in {"12", "13", "12-13"}:
+        phase12, phase13, elapsed = run_phase12_to_13(df)
+        print_phase12_to_13(phase12, phase13, elapsed)
         print(f"\nPhase demandee terminee: {args.phase}")
         return
 

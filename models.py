@@ -118,6 +118,46 @@ class SingleHeadSelfAttention(torch.nn.Module):
         return {"q": q, "k": k, "v": v, "scores": scores, "weights": weights, "output": output}
 
 
+class TwoHeadSelfAttention(torch.nn.Module):
+    def __init__(self, d_model: int = 32) -> None:
+        super().__init__()
+        if d_model % 2 != 0:
+            raise ValueError("d_model doit etre divisible par 2 pour exactement deux tetes.")
+        self.d_model = d_model
+        self.head_dim = d_model // 2
+        self.head1 = torch.nn.ModuleDict(
+            {
+                "wq": torch.nn.Linear(d_model, self.head_dim),
+                "wk": torch.nn.Linear(d_model, self.head_dim),
+                "wv": torch.nn.Linear(d_model, self.head_dim),
+            }
+        )
+        self.head2 = torch.nn.ModuleDict(
+            {
+                "wq": torch.nn.Linear(d_model, self.head_dim),
+                "wk": torch.nn.Linear(d_model, self.head_dim),
+                "wv": torch.nn.Linear(d_model, self.head_dim),
+            }
+        )
+        self.wo = torch.nn.Linear(d_model, d_model)
+
+    def _head(self, x: torch.Tensor, layers: torch.nn.ModuleDict) -> dict[str, torch.Tensor]:
+        q = layers["wq"](x)
+        k = layers["wk"](x)
+        v = layers["wv"](x)
+        scores = q @ k.T / math.sqrt(self.head_dim)
+        weights = torch.softmax(scores, dim=-1)
+        output = weights @ v
+        return {"q": q, "k": k, "v": v, "scores": scores, "weights": weights, "output": output}
+
+    def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor | dict[str, torch.Tensor]]:
+        head1 = self._head(x, self.head1)
+        head2 = self._head(x, self.head2)
+        concat = torch.cat([head1["output"], head2["output"]], dim=-1)
+        output = self.wo(concat)
+        return {"head1": head1, "head2": head2, "concat": concat, "output": output}
+
+
 def positional_encoding(seq_len: int, embedding_dim: int, device: torch.device | None = None) -> torch.Tensor:
     positions = torch.arange(seq_len, dtype=torch.float32, device=device).unsqueeze(1)
     dims = torch.arange(0, embedding_dim, 2, dtype=torch.float32, device=device)

@@ -391,3 +391,42 @@ Ces poids viennent d'un mecanisme non entraine : ils montrent comment lire la ma
 - ecart apres position : 0.127998054
 - encodage : sinusoidal deterministe
 - figure : `outputs/phase11_position_comparison.png`
+
+## Phase 12 — Le prix des regards
+
+Chaque token compare sa requete aux cles de tous les tokens. La matrice `weights` possede donc `n x n` coefficients : sa memoire croit en `O(n^2)`, et le produit `QK^T` augmente fortement avec la longueur. Le temps reel ne suit pas obligatoirement un facteur exact x4 a chaque doublement, car les petits tenseurs subissent l'overhead Python, le cache et la vectorisation.
+
+| seq_len | temps median ms | cellules attention | memoire MiB |
+|---:|---:|---:|---:|
+| 16 | 0.115850 | 256 | 0.000977 |
+| 32 | 0.089100 | 1024 | 0.003906 |
+| 64 | 0.137600 | 4096 | 0.015625 |
+| 128 | 0.162400 | 16384 | 0.062500 |
+| 256 | 0.187000 | 65536 | 0.250000 |
+| 512 | 0.470850 | 262144 | 1.000000 |
+
+| doublement | ratio temps observe | ratio cellules |
+|---:|---:|---:|
+| 16 -> 32 | 0.769 | 4.0 |
+| 32 -> 64 | 1.544 | 4.0 |
+| 64 -> 128 | 1.180 | 4.0 |
+| 128 -> 256 | 1.151 | 4.0 |
+| 256 -> 512 | 2.518 | 4.0 |
+
+Diagnostic log-log `log(time) ~ alpha * log(n)` : alpha=0.388. Figure : `outputs/phase12_attention_scaling.png`. Donnees : `outputs/phase12_attention_scaling.csv`.
+
+## Phase 13 — Deux paires d'yeux
+
+Une tete correspond a une famille de projections `Q/K/V`. Ici, deux tetes manuelles possedent deux familles independantes et travaillent chacune dans un sous-espace de dimension 16. Leurs sorties `[n,16]` sont concatenees en `[n,32]`, puis `Wo` les reprojette vers `d_model=32`.
+
+- vrai releve : index 0, commentaire `This event took place in early fall around 1949-50. It occurred after a Boy Scout meeting in the Baptist Church. The Baptist Church sit`
+- tokens : `['this', 'event', 'took', 'place', 'in', 'early', 'fall', 'around', '1949', '50', 'it', 'occurred', 'after', 'a', 'boy', 'scout', 'meeting', 'in', 'the', 'baptist', 'church', 'the', 'baptist', 'church', 'sit']`
+- dimensions : X=(25, 32), head1 output=(25, 16), head2 output=(25, 16), concat=(25, 32), final=(25, 32)
+- weights tete 1=(25, 25), weights tete 2=(25, 25)
+- preuve lignes = 1 : erreur max tete 1=1.1920929e-07, erreur max tete 2=1.7881393e-07
+- difference moyenne absolue weights1/weights2 : 0.01398874
+- similarite cosinus aplatie : 0.90639651
+- pronom : `this` ; tete 1 regarde surtout `50` poids=0.059527 ; tete 2 regarde surtout `1949` poids=0.074629
+- figure : `outputs/phase13_two_heads.png`
+
+Ces poids ne sont pas entraines : les deux projections produisent des patrons d'attention differents, mais on ne peut pas attribuer un role linguistique reel aux tetes.
