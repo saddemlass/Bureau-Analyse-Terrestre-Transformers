@@ -1,0 +1,101 @@
+question_id,question,method,retrieved_ids,source_excerpts,source_correct,justification_humaine
+1,What sounds or noises did witnesses hear during the sightings?,tfidf,R35216 R35275 R56472 R52235 R34128 R37001 R52853 R57442 R81162 R63058 R40011 R12308 R60008 R4826 R40961 R33175 R34220 R12055 R58076 R54083 R38519 R53761 R54262 R79287 R80330 R77921 R23114 R46545 R39377 R73959,"[R35216] 3/15/2009 00:00 | erith (uk/england) |  | gb | unknown | Odd noises
+[R35275] 3/15/2013 20:00 | montoursville | pa | us | circle | Montoursville sightings.
+[R56472] 6/2/2004 18:00 | pahrump | nv | us | formation | didn't see anythign nor did we hear anything but there they were.
+[R52235] 6/1/1972 22:00 | winnebago | il | us | triangle | It seemed to hear what we were talking about.
+[R34128] 3/1/2011 00:00 | reading | pa | us | sphere | What did I see?",FALSE,TF-IDF s'abstient alors que les extraits contiennent du bruit exploitable.
+1,What sounds or noises did witnesses hear during the sightings?,naive,R16533 R33175 R40961 R159 R443 R476 R484 R713 R882 R1692 R1935 R2138 R2256 R2812 R3162 R3275 R3693 R3837 R3933 R4826 R5176 R5409 R5807 R6340 R6344,"[R16533] 11/5/2005 23:00 | cranston | ri | us | unknown | we were inside our house and heard several loud jet like sounds that would stop and then start up agan (exactly like the noises posted
+[R33175] 2/8/2001 19:44 | wakefield (uk/england) |  | gb | cigar | IT WAS BRIGHT GREEN, WITH A ORANGE/YELLOW TAIL, MOVING FROM EAST TO WEST, DID NOT HEAR ANY SOUNDS FROM IT, ALL HAPPEND IN A FEW SECONDS
+[R40961] 4/15/1998 20:30 | hartsgrove | oh | us | disk | Large disc shaped aircraft producing intense volumes of buzzing noises that for some reason I could only hear is what I saw in the sky
+[R159] 10/10/2005 20:00 | loretto | pa | us | triangle | Dull red flash, Triangular ship, Vocal Noises
+[R443] 10/11/2009 04:00 | crisfield | md | us | light | A bright light moving across the sky getting closer stopped on a dime got brighter and took off with no sounds at all",TRUE,Les citations parlent directement de sons entendus ou non entendus.
+2,Which colors are most clearly described by witnesses?,tfidf,R63058 R84182 R18443 R82854 R38706 R58653 R44493 R4408 R54302 R52378 R58665 R36514 R54242 R31747 R87822 R28193 R61546 R8956 R8781 R30460 R38671 R54358 R88122 R58719 R7963 R21493 R54612,"[R63058] 7/15/1987 01:30 | teller | ak | us | disk | 5 CREDITABLE WITNESSES
+[R84182] 9/20/1999 02:00 | momoishi (japan) |  |  | triangle | Encounter described in details.
+[R18443] 1/19/2014 02:30 | southfield | mi | us | disk | Circular with colors.
+[R82854] 9/15/2003 22:15 | denver | co | us | formation | The formation can best be described as being in the shape of a ""snake""
+[R38706] 3/5/2010 23:18 | oak harbor | wa | us | other | 4 lights seen clearly many difrent colors that seem to move and turn but do not move in any direction",FALSE,Les citations mentionnent surtout des couleurs sans repondre proprement a quelles couleurs.
+2,Which colors are most clearly described by witnesses?,naive,R32 R59 R88 R326 R453 R489 R575 R730 R904 R907 R989 R1002 R1132 R1253 R1467 R1838 R1976 R2307 R2447 R2639 R2765 R2895 R3074 R3120 R3238,"[R32] 10/10/1979 22:00 | security | co | us | unknown | very low clouds all different colors,search lights were seen shining down out of the clouds on the houses and streets. this event was s
+[R59] 10/10/1993 22:00 | peoria | il | us | light | Light over Peoria, IL that moves slowly, stops in mid-air, hovers, changes colors, shoots in opposite direction and disappears.
+[R88] 10/10/1999 03:00 | st. agnes de dundee (canada) | pq |  | egg | early morning bright object egg shape fully colorder chaging colors as it turn as it was going it change to white colors
+[R326] 10/11/1998 20:30 | highland | in | us | sphere | Possible shperical object in northern sky. Colors were green over yellow over red. Disappeard, then reappeared west of original locat
+[R453] 10/11/2010 00:30 | redondo beach | ca | us | other | three lights that changed colors rapidly suspended over the ocean that increased and decreased in intensity often",FALSE,Les sources parlent de couleurs mais ne soutiennent pas une reponse precise a quelles couleurs.
+3,How do witnesses describe the movement of the objects?,tfidf,R63058 R37494 R57033 R84193 R12428 R84050 R54302 R21060 R87887 R54358 R88122 R54612 R70753 R48568 R32710 R4726 R28306 R39650 R81100 R84044 R24254 R82313 R48656 R15793 R61647 R49116 R30921 R30923 R23195 R23153 R40934,"[R63058] 7/15/1987 01:30 | teller | ak | us | disk | 5 CREDITABLE WITNESSES
+[R37494] 3/27/2008 22:00 | pope afb | nc |  | triangle | Objects could be F-117s
+[R57033] 6/23/2009 23:58 | guernsey (uk/england??) |  |  | unknown | objects
+[R84193] 9/20/2000 12:30 | thessaloniki (greece) |  |  | oval | how the objects were
+[R12428] 1/1/2011 00:00 | lincoln city | or | us | light | irratic star movement",TRUE,Les citations soutiennent des mouvements erratiques ou atypiques.
+3,How do witnesses describe the movement of the objects?,naive,R385 R531 R749 R752 R1448 R1530 R1575 R1740 R1905 R1907 R1980 R2164 R2474 R2819 R3011 R3187 R3223 R3592 R3720 R3914 R4007 R4366 R4411 R4619 R4708,"[R385] 10/11/2004 22:29 | laredo | tx | us | fireball | Large flaming tail and eratic movement - sudden change of direction
+[R531] 10/1/1959 20:45 | duluth | wi |  |  | Single saucer shaped craft observed from Duluth Mn. skies over Lake Superior-first stationary, then NW movement.
+[R749] 10/1/2001 19:00 | kansas city | mo | us | light | 3 bright lights at high altitude west of Kansas City at 2100 hours on 10/1/01 in a general westward movement.
+[R752] 10/1/2001 21:00 | interstate 5 or tributary between vasilia and sacrammento | ca |  | triangle | black triangle , 3 lights, silent swift movement, near air force base
+[R1448] 10/13/2005 20:00 | miami | fl | us | other | A boomerang shaped craft moving north to south, stopped, circled, and continued south movement.",TRUE,"Les citations decrivent directement changement de direction, stationnaire puis mouvement ou deplacement."
+4,Are there sightings reported over cities or inhabited areas?,tfidf,R53917 R54763 R35275 R21289 R82069 R42372 R66824 R58076 R6253 R70116 R438 R79287 R23114 R53501 R39891 R14133 R30574 R43951 R67967 R75027 R44161 R22111 R9621 R62342 R39465 R47484 R21536 R6989,"[R53917] 6/15/1920 24:00 | mussell county | mt |  |  | Multiple sightings reported in rural Montana from the early 20th Century.
+[R54763] 6/15/2004 21:00 | clinton | ms | us | triangle | On-going UFO sightings ((NUFORC Note: Multiple sightings reported by witness; date is approximate. PD))
+[R35275] 3/15/2013 20:00 | montoursville | pa | us | circle | Montoursville sightings.
+[R21289] 1/2/2014 19:00 |  |  |  |  | ,Via ABC7 News San Francisco local news iOS app) UFO sightings reported Tuesday night across California http://abclocal.
+[R82069] 9/13/2003 24:00 |  |  |  |  | ,Curious to know if any sightings reported near Kennerdell, PA 9/13/03 and 9/17/03. I viewed along with seven other witnesses a large o",FALSE,L'abstention est trop prudente car des zones habitees ou nommees sont presentes.
+4,Are there sightings reported over cities or inhabited areas?,naive,R438 R3194 R3197 R6989 R9053 R14133 R15079 R15756 R16897 R18306 R21536 R21852 R22111 R23463 R25388 R26395 R33908 R35811 R37745 R39213 R39891 R40475 R41412 R42372,"[R438] 10/11/2008 20:30 | villa park/lombard | il |  | changing | Several Orange Lights Over Vila Park Lomabrd Areas 10-11-2008
+[R3194] 10/19/1999 03:10 | van nuys | ca | us | triangle | extremely fast, silent, large medium gray(matte finish) triangle with shaded areas at each bottom corner flying from NW to SE.
+[R3197] 10/19/1999 17:30 | bozeman | mt | us | unknown | THREE SMALL FLYING OBJECTS CAME TOGETHER FROM DIFFERNT AREAS TO FORM A STACKED FORMATION, THEN ROTATED CLOCK WISE TO ABOUT 2 OCLOCK FO
+[R6989] 10/4/2006 22:45 | minneapolis | mn | us | other | Glowing green object crosses Twin Cities at low altitude
+[R9053] 1/11/1997 22:00 | carrollton | tx | us | circle | Very distinct object (circular in shape) passed over three major suburb cities of Dallas, Tx.",FALSE,L'abstention est incorrecte car des villes ou zones urbaines sont citees.
+5,What do witnesses report seeing at night?,tfidf,R40007 R82626 R30465 R63058 R29794 R28729 R30067 R76608 R27586 R68224 R82513 R74189 R30864 R17379 R28908 R68435 R83537 R85573 R16771 R72065 R12043 R14736 R84738 R74707 R54378 R52806,"[R40007] 4/1/1996 24:00 | lumberton | tx | us |  | Multiple witnesses report yellow object in night sky.
+[R82626] 9/15/1985 02:30 | mumbai (india) |  |  | other | UFO SPOTTED 20 YRS BACK. WITNESSES REPORT IT NOW DUE TO FEAR!!!
+[R30465] 2/19/2014 15:00 | tulsa | ok | us |  | ((HOAX??)) Multiple witnesses report hearing a very strange sound, emanating from the sky.
+[R63058] 7/15/1987 01:30 | teller | ak | us | disk | 5 CREDITABLE WITNESSES
+[R29794] 2/16/1995 23:45 | kalamazoo | mi | us |  | Man report seeing multiple objects moving east (!). Watches them for five minutes. (See other sightings above.)",TRUE,Les citations soutiennent des observations nocturnes d'objets ou lumieres.
+5,What do witnesses report seeing at night?,naive,R8799 R17013 R19130 R19943 R23809 R28354 R31082 R37012 R45417 R50116 R52806 R60211 R67768 R71974 R84168 R84738 R4 R17 R39 R44 R50 R55 R58,"[R8799] 11/11/2004 19:00 | college station | tx | us | changing | I have made several reports recently and had the most disturbing sighting last night. I previously reported seeing objects that appeare
+[R17013] 1/16/2007 18:00 | woodville | al | us | light | My husband and I have been seeing a light on the western horizon right at about 6pm every night for a while now. We traveled west on Hw
+[R19130] 12/1/1995 23:40 | orland park | il | us |  | Man repts. seeing 4-5 very bright, multi-colored lights in southern night sky. Appear to move, but very little. (Twinkling stars?)
+[R19943] 12/13/2012 19:00 | fort smith | ar | us | circle | Seeing multiple round yellowish/whiteish colored orbs/ufo's in the night sky almost every night in Fort Smith, Arkansas.
+[R23809] 12/31/1999 23:47 | keys/ceres (between) | ca |  | other | On New Years Eve Night I witnessed 6 glowing objest in the sky moving very slow. I wasn't seeing things because I only had 1 Drink all",TRUE,Les sources citees parlent directement de choses vues la nuit.
+6,Do witnesses describe multiple objects or multiple lights?,tfidf,R35337 R61955 R14213 R79193 R76460 R70276 R19481 R10716 R13208 R64974 R30836 R38242 R24701 R72114 R6105 R65405 R75859 R42965 R13261 R29061 R38480 R21084 R1520 R70955 R55031 R23715 R8935 R42462 R71580 R45555 R88428,"[R35337] 3/16/2002 22:00 | lake worth | fl | us | formation | Multiple witnesses to multiple objects
+[R61955] 7/12/2002 02:00 | pocatello | id | us | triangle | Multiple Objects
+[R14213] 11/24/2013 18:28 | monrovia | ca | us | light | Multiple lights in the sky.
+[R79193] 8/4/2013 20:12 | knappa | or | us | circle | Multiple lights in sky.
+[R76460] 8/23/2003 17:00 | reno | nv | us | light | Multiple objects over Reno",TRUE,Les citations soutiennent directement des objets ou lumieres multiples.
+6,Do witnesses describe multiple objects or multiple lights?,naive,R302 R1330 R1520 R1562 R1763 R2014 R2618 R2714 R3175 R3399 R3434 R3840 R4167 R4220 R4261 R4538 R5093 R5195 R5498 R5593 R5797 R6105 R6125 R7037 R7490 R7722 R7868,"[R302] 10/10/2013 21:00 | kingsville (canada) | on | ca |  | Extremely fast multiple colored lights, constantly moving and stopping back to its place of origin. ((NUFORC Note: Star? PD))
+[R1330] 10/12/2013 22:30 | west newbury | ma |  | sphere | Witness one saw sphere shape with multiple lights, stationary for a while. green to red. Witness 2 saw zig zagging pattern, like a
+[R1520] 10/13/2010 21:00 | san francisco | ca | us | light | Multiple lights over Ocean Beach
+[R1562] 10/13/2012 20:30 | milford | ct | us | light | Approx 30 lights in formation over Milford ct multiple parachutters at approx 8:30p.
+[R1763] 10/14/2008 21:00 | port st. joe | fl |  | light | Multiple sightings of white/yellow lights over the beach at Port St. Joe State Park, Florida on 10/14/08",TRUE,Les sources citees decrivent clairement plusieurs lumieres ou objets.
+7,Which reports describe very long observations?,tfidf,R60291 R988 R85667 R22247 R222 R22643 R82220 R24980 R55042 R57493 R65148 R82526 R63458 R60710 R7114 R16397 R76430 R50215 R83904 R37406 R48430 R19772 R68956 R14340 R75482 R85781,"[R60291] 6/8/1970 24:00 | burnaby (canada) | bc | ca | oval | The reports above you…
+[R988] 10/1/2009 23:00 | fairfield | ct | us | light | 2 seperate observations. Fairfield, CT
+[R85667] 9/24/2007 12:30 | fort washington | pa | us | other | Four + hours of observation, four individual observations of short duration
+[R22247] 12/23/2010 00:00 | mccomb | ms | us | cylinder | Have you there been any reports from mississippi if not there should be?
+[R222] 10/10/2009 16:24 | eagar | az | us | unknown | Second sighting was only 150 feet away. Observations between two sightings.",FALSE,Les citations ne prouvent pas correctement de tres longues durees d'observation.
+7,Which reports describe very long observations?,naive,R50 R219 R222 R432 R433 R592 R793 R850 R867 R933 R971 R988 R1065 R1074 R1136 R1377 R1528 R1621 R1701 R1908 R1984 R2144 R2197 R2274,"[R50] 10/10/1990 20:00 | pense (canada) | sa |  | unknown | i saw something one rainy night, and i'll never forget it as long as i live.
+[R219] 10/10/2009 00:00 | greenland |  |  | rectangle | Found this on google maps 70.5, -40.3 Look it up, this can't be an error or an artifact on the photo it is 50+ miles long.
+[R222] 10/10/2009 16:24 | eagar | az | us | unknown | Second sighting was only 150 feet away. Observations between two sightings.
+[R432] 10/11/2008 17:30 | bellmere (australia) |  |  | cylinder | Very large long white cylinder object traveling high up and smoothly above storm clouds.
+[R433] 10/11/2008 19:00 | bridgeport | ct | us | circle | I saw 6 glowing orbs lining up in different formations witin a 2 hour period over Long Island Sound.",FALSE,"Le mot long est souvent interprete comme longueur physique ou expression, pas duree."
+8,Which reports describe very short observations?,tfidf,R60291 R85667 R35855 R988 R63531 R53981 R22247 R222 R22643 R82220 R24980 R63480 R55042 R57493 R65148 R82526 R63458 R55249 R60710 R75149 R18306 R7114 R16397 R31935 R51684 R50215 R83904,"[R60291] 6/8/1970 24:00 | burnaby (canada) | bc | ca | oval | The reports above you…
+[R85667] 9/24/2007 12:30 | fort washington | pa | us | other | Four + hours of observation, four individual observations of short duration
+[R35855] 3/19/2001 10:00 | ((unspecified)) | nm |  | disk | Short timed sighting over mountain
+[R988] 10/1/2009 23:00 | fairfield | ct | us | light | 2 seperate observations. Fairfield, CT
+[R63531] 7/15/2008 01:00 | richmond | ky | us | cigar | very short but still wierd",TRUE,Les citations incluent des observations explicitement courtes.
+8,Which reports describe very short observations?,naive,R85667 R222 R349 R357 R808 R950 R988 R1289 R1321 R2328 R2840 R3444 R3779 R3806 R3976 R3984 R4012 R4169 R4274 R4294 R4500 R4882 R5997 R6031 R6713,"[R85667] 9/24/2007 12:30 | fort washington | pa | us | other | Four + hours of observation, four individual observations of short duration
+[R222] 10/10/2009 16:24 | eagar | az | us | unknown | Second sighting was only 150 feet away. Observations between two sightings.
+[R349] 10/11/2000 19:30 | london (uk/england) |  | gb | diamond | Diamond shaped ufo seen pulsing for short time near London England
+[R357] 10/11/2001 08:15 | columbia | ms | us | teardrop | short vapotr looking teardropped object, always beside the sun!!!noticed from 10/11-10/26/01
+[R808] 10/1/2004 17:00 | las vegas | nv | us | cylinder | ((HOAX??)) Short encounter with space craft on my way into my parking lot area.",TRUE,"Les citations contiennent short duration, short time ou short encounter."
+9,Are there reports of objects hovering or staying still?,tfidf,R60291 R80820 R48710 R30581 R86997 R69399 R70097 R37096 R21984 R28349 R38011 R45337 R20954 R12247 R54893 R46534 R63458 R26659 R80459 R79516 R70754 R75318 R52812 R48528 R42813 R22247 R71634 R3574 R53381 R6650,"[R60291] 6/8/1970 24:00 | burnaby (canada) | bc | ca | oval | The reports above you…
+[R80820] 9/10/2012 19:00 | alexandria | va | us | rectangle | Two objects hovering in Alexandria Virginia
+[R48710] 5/22/2011 08:10 | summerville | sc | us | fireball | 3 burning objects hovering.
+[R30581] 2/20/2007 20:00 | voorhees | nj | us | sphere | Bright objects hovering over Flyers Skaye Zone in Voorhees.
+[R86997] 9/30/2000 21:47 | san fernando valley | ca |  | light | Multiple red objects hovering.",TRUE,Les citations soutiennent directement des objets en vol stationnaire.
+9,Are there reports of objects hovering or staying still?,naive,R2637 R7 R73 R79 R83 R115 R136 R138 R198 R232 R248 R290 R331 R388 R451 R471 R483 R530 R532 R537 R567 R590 R623 R640 R645,"[R2637] 10/16/2009 19:30 | selby (uk/england) |  | gb | changing | A orange splatter shaped light hovering in one place for about 4 minutes, slightly moving around but staying in round about the same sp
+[R7] 10/10/1965 23:45 | norwalk | ct | us | disk | A bright orange color changing to reddish color disk/saucer was observed hovering above power transmission lines.
+[R73] 10/10/1997 17:00 | mesa | az | us | sphere | A small dark purple quad-thruster craft hovering 200-300 feet in the sky. 500 Lights On Object0: Yes
+[R79] 10/10/1998 13:15 | elgin | il | us | cylinder | While looking up at sky I noticed a bright light hovering above the sky. then I noticed a jet airliner traveling in the same area and I
+[R83] 10/10/1998 20:30 | spokane (about 30 miles sw of,i-90, maybe mm 254) | wa | us | triangle | Dark boomerange object seen for ten minutes hovering over the freeway with a bright light out the front that lit up the fields. No jet",TRUE,Les citations parlent de hovering ou staying in one place.
+10,Did witnesses report a smell of chocolate or vanilla near the objects?,tfidf,R82626 R40007 R30465 R73943 R34128 R37001 R52853 R57442 R81162 R63058 R7190 R67269 R68224 R82513 R19884 R17379 R73270 R68435 R21873 R53761 R86726 R37494 R57033 R84193 R14736 R60146 R57517 R39913 R54302,"[R82626] 9/15/1985 02:30 | mumbai (india) |  |  | other | UFO SPOTTED 20 YRS BACK. WITNESSES REPORT IT NOW DUE TO FEAR!!!
+[R40007] 4/1/1996 24:00 | lumberton | tx | us |  | Multiple witnesses report yellow object in night sky.
+[R30465] 2/19/2014 15:00 | tulsa | ok | us |  | ((HOAX??)) Multiple witnesses report hearing a very strange sound, emanating from the sky.
+[R73943] 8/15/2006 22:00 | orchard park | ny | us | other | Sudden gas cloud or smell.................
+[R34128] 3/1/2011 00:00 | reading | pa | us | sphere | What did I see?",TRUE,L'abstention est correcte car les resultats ne prouvent pas chocolat ou vanille comme odeur.
+10,Did witnesses report a smell of chocolate or vanilla near the objects?,naive,R10905 R19884 R21873 R22049 R73270 R73943 R83346 R86726 R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16,"[R10905] 11/16/1999 19:10 | indianapolis | in | us | fireball | I was walking the dog about 7:10 PM when I saw a Vanilla white fireball moving West to East past the intersection of South Keystone Ave
+[R19884] 12/13/2007 21:30 | sacramento | ca | us | cigar | Skunk smell for over 10 miles while very large craft flew across the sky.
+[R21873] 1/22/2010 22:30 | southbridge | ma | us | triangle | Wedge shaped, Unusual lights, severe ozone smell
+[R22049] 12/22/2008 18:45 | huntington beach | ca | us | light | At approximately 6:45pm on December 22, 2008 I went into my back yard to smell the fresh air. I looked up and noticed some clouds and s
+[R73270] 8/14/2012 09:00 | upland/rancho cucamonga | ca |  | cigar | During that day a smell of sulfur could be smelt from Rancho Cucamonga to Upland California.",TRUE,L'abstention est correcte car les odeurs citees ne sont pas chocolat ou vanille.

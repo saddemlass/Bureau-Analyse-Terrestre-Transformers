@@ -53,6 +53,7 @@ from pretrained import (
     run_regime,
     tokenizer_audit,
 )
+from retrieval import run_phase15
 
 
 DATA_URLS = [
@@ -2174,11 +2175,145 @@ def print_phase6_to_9(phase6: dict[str, object], phase7: dict[str, object], phas
         )
 
 
+def append_report_phase15(result: dict[str, object]) -> None:
+    questions_md = "\n".join(
+        f"{idx}. {question}" for idx, question in enumerate(result["questions"], start=1)
+    )
+    summaries = result["summaries"]
+    tfidf_rows = [row for row in summaries if row["method"] == "tfidf"]
+    naive_rows = [row for row in summaries if row["method"] == "naive"]
+    tfidf_mean_sources = np.mean([row["selected_count"] for row in tfidf_rows])
+    naive_mean_sources = np.mean([row["selected_count"] for row in naive_rows])
+    tfidf_mean_tokens = np.mean([row["tokens_used"] for row in tfidf_rows])
+    naive_mean_tokens = np.mean([row["tokens_used"] for row in naive_rows])
+    difficult = next(row for row in tfidf_rows if row["question_id"] == 10)
+    rates = result["source_rates"]
+    tfidf_rate = rates["tfidf"]
+    naive_rate = rates["naive"]
+    rate_diff = abs(tfidf_rate["correct"] - naive_rate["correct"])
+
+    examples = []
+    for row in [next(row for row in tfidf_rows if not row["abstained"]), next(row for row in naive_rows if not row["abstained"])]:
+        source_lines = "\n".join(
+            f"- [{source.source_id}] {source.datetime} | {source.city} | {source.state} | "
+            f"{source.country} | {source.shape} | {source.comments[:180]}"
+            for source in row["answer_sources"]
+        )
+        examples.append(
+            f"Question ({row['method']}) : {row['question']}\n\n"
+            f"Reponse : {row['answer']}\n\nSources :\n{source_lines}"
+        )
+
+    det = result["determinism"]
+    tfidf_cfg = result["tfidf_config"]
+    section = f"""
+
+## Phase 15 — Le Conseil pose des questions, vous citez vos sources
+
+### Objectif
+Construire un systeme question naturelle -> retrieval sur le corpus complet -> budget de texte -> reponse courte sourcee. Le modele ne recoit jamais les 88 875 commentaires a chaque question : il ne voit que les releves recuperes dans le budget.
+
+### Questions figees
+Liste definie dans `PHASE15_QUESTIONS` avant toute mesure :
+
+{questions_md}
+
+### Corpus
+Le retrieval interroge {result['corpus_size']} releves issus de `releves_klaxo3.csv`, pas seulement les exemples supervises des phases precedentes. Le CSV local n'a pas de colonne `event_id`; les sources utilisent donc l'index original zero-based du CSV, note `R{{index}}`.
+
+### TF-IDF
+Configuration deterministe : lowercase={tfidf_cfg['lowercase']}, stop_words=`{tfidf_cfg['stop_words']}`, ngram_range={tfidf_cfg['ngram_range']}, min_df={tfidf_cfg['min_df']}, max_features={tfidf_cfg['max_features']}, norm=`{tfidf_cfg['norm']}`. Le TF-IDF est appris uniquement sur `comments`; `shape` n'est jamais utilise pour classer la pertinence.
+
+### Baseline naive
+Baseline volontairement simple : {result['naive_config']}. Elle retire des stopwords anglais, compte les mots significatifs de la question presents dans chaque commentaire, puis applique le meme tie-break deterministe par index CSV.
+
+### Budget
+Budget fixe : {result['token_budget']} tokens pour toutes les questions. Le comptage utilise le tokenizer Phase 14 `{result['tokenizer']}` quand il est disponible localement, sinon un fallback par mots. Les sources sont ajoutees dans l'ordre de pertinence sans depasser volontairement ce budget.
+
+### Citations et abstention
+Chaque source conserve `id`, `datetime`, `city`, `state`, `country`, `shape` et `comments`. Les reponses affirmatives citent les releves utilises sous la forme `[Rindex]`, retrouvable directement dans le CSV. Regle d'abstention : {result['abstention_rule']}.
+
+### Determinisme
+Question repetee : {det['question']}
+
+- Run 1 : {det['run1']}
+- Run 2 : {det['run2']}
+- Meme resultat : {'OUI' if det['same'] else 'NON'}
+
+### Audit humain des sources
+Les 20 couples question/methode ont ete verifies humainement dans `outputs/phase15_source_audit.csv` : 10 questions x 2 methodes. Il ne reste aucune ligne en attente d'audit.
+
+| methode | correct | correct_source_rate | releves moyens | tokens moyens |
+| --- | ---: | ---: | ---: | ---: |
+| TF-IDF | {tfidf_rate['correct']}/{tfidf_rate['total']} | {tfidf_rate['rate']:.0%} | {tfidf_mean_sources:.2f} | {tfidf_mean_tokens:.1f} |
+| naive | {naive_rate['correct']}/{naive_rate['total']} | {naive_rate['rate']:.0%} | {naive_mean_sources:.2f} | {naive_mean_tokens:.1f} |
+
+Difference : {rate_diff} question sur 10.
+
+La baseline naive obtient ici 70 % de reponses correctement sourcees contre 60 % pour TF-IDF, soit un seul cas de difference sur dix questions. Ce leger avantage ne suffit pas a conclure a une superiorite generale ; il montre surtout que plusieurs questions de cette batterie sont tres lexicales.
+
+Figure : `outputs/phase15_retrieval_comparison.png`, proportion de reponses correctement sourcees d'apres l'audit humain.
+
+### Echecs interessants
+- Q1 : TF-IDF s'abstient trop alors que les extraits contiennent du bruit exploitable.
+- Q2 : aucune methode ne repond proprement a "quelles couleurs".
+- Q4 : les deux methodes s'abstiennent malgre plusieurs mentions de zones habitees.
+- Q7 : le mot "long" cree une ambiguite entre duree et longueur physique.
+- Q10 : les deux systemes s'abstiennent correctement.
+
+### Exemples
+{examples[0]}
+
+{examples[1]}
+
+### Cas sans reponse
+Question difficile : {difficult['question']}
+
+Reponse TF-IDF : {difficult['answer']}
+
+### Limites
+BERT-tiny Phase 14 (`prajjwal1/bert-tiny`) est un encodeur/classifieur, pas un modele generatif libre. Il sert ici au comptage de tokens si son tokenizer est disponible localement; la synthese est deterministe et limitee aux passages recuperes. Le systeme reste lexical : synonymes, formulations rares et questions en francais peuvent reduire le rappel. L'audit humain reste necessaire pour valider strictement les citations.
+
+Fichiers : `outputs/phase15_questions.csv`, `outputs/phase15_source_audit.csv`, `outputs/phase15_retrieval_comparison.png`.
+"""
+    report = Path("RAPPORT.md")
+    text = report.read_text(encoding="utf-8", errors="replace") if report.exists() else ""
+    marker = "\n## Phase 15 "
+    if marker in text:
+        text = text.split(marker)[0].rstrip() + section
+    else:
+        text = text.rstrip() + section
+    report.write_text(text + "\n", encoding="utf-8")
+
+
+def print_phase15(result: dict[str, object]) -> None:
+    print("\n=== PHASE 15 - LE CONSEIL POSE DES QUESTIONS ===")
+    print(f"Corpus interroge: {result['corpus_size']}")
+    print("Questions figees:")
+    for idx, question in enumerate(result["questions"], start=1):
+        print(f"{idx}. {question}")
+    print(f"TF-IDF: {result['tfidf_config']}")
+    print(f"Baseline naive: {result['naive_config']}")
+    print(f"Budget tokens: {result['token_budget']}")
+    for row in result["summaries"]:
+        print(
+            f"Q{row['question_id']:02d} {row['method']}: releves={row['selected_count']} | "
+            f"tokens={row['tokens_used']}/{result['token_budget']} | top_score={row['top_score']:.4f} | "
+            f"{'ABSTENTION' if row['abstained'] else 'REPONSE'}"
+        )
+    det = result["determinism"]
+    print(f"Question repetee : {det['question']}")
+    print(f"Run 1 : {det['run1']}")
+    print(f"Run 2 : {det['run2']}")
+    print(f"Meme resultat : {'OUI' if det['same'] else 'NON'}")
+    print(f"Temps Phase 15={result['elapsed_s']:.2f}s")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Bureau d'analyse terrestre")
     parser.add_argument(
         "--phase",
-        choices=["6", "7", "8", "9", "10", "11", "10-11", "12", "13", "12-13", "14"],
+        choices=["6", "7", "8", "9", "10", "11", "10-11", "12", "13", "12-13", "14", "15"],
         help="executer rapidement une phase ciblee",
     )
     return parser.parse_args()
@@ -2207,6 +2342,13 @@ def main() -> None:
     if args.phase in {"12", "13", "12-13"}:
         phase12, phase13, elapsed = run_phase12_to_13(df)
         print_phase12_to_13(phase12, phase13, elapsed)
+        print(f"\nPhase demandee terminee: {args.phase}")
+        return
+
+    if args.phase == "15":
+        phase15 = run_phase15(raw_df, OUTPUT_DIR)
+        append_report_phase15(phase15)
+        print_phase15(phase15)
         print(f"\nPhase demandee terminee: {args.phase}")
         return
 

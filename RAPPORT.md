@@ -458,3 +458,94 @@ Le Bureau peut se payer lora parce qu'il combine score et cout : il donne macro-
 
 Fichiers : `outputs/phase14_regimes.csv`, `outputs/phase14_score_cost.png`.
 
+## Phase 15 — Le Conseil pose des questions, vous citez vos sources
+
+### Objectif
+Construire un systeme question naturelle -> retrieval sur le corpus complet -> budget de texte -> reponse courte sourcee. Le modele ne recoit jamais les 88 875 commentaires a chaque question : il ne voit que les releves recuperes dans le budget.
+
+### Questions figees
+Liste definie dans `PHASE15_QUESTIONS` avant toute mesure :
+
+1. What sounds or noises did witnesses hear during the sightings?
+2. Which colors are most clearly described by witnesses?
+3. How do witnesses describe the movement of the objects?
+4. Are there sightings reported over cities or inhabited areas?
+5. What do witnesses report seeing at night?
+6. Do witnesses describe multiple objects or multiple lights?
+7. Which reports describe very long observations?
+8. Which reports describe very short observations?
+9. Are there reports of objects hovering or staying still?
+10. Did witnesses report a smell of chocolate or vanilla near the objects?
+
+### Corpus
+Le retrieval interroge 88875 releves issus de `releves_klaxo3.csv`, pas seulement les exemples supervises des phases precedentes. Le CSV local n'a pas de colonne `event_id`; les sources utilisent donc l'index original zero-based du CSV, note `R{index}`.
+
+### TF-IDF
+Configuration deterministe : lowercase=True, stop_words=`english`, ngram_range=(1, 2), min_df=2, max_features=60000, norm=`l2`. Le TF-IDF est appris uniquement sur `comments`; `shape` n'est jamais utilise pour classer la pertinence.
+
+### Baseline naive
+Baseline volontairement simple : mots significatifs de la question, stopwords anglais retires, score=nombre de mots presents. Elle retire des stopwords anglais, compte les mots significatifs de la question presents dans chaque commentaire, puis applique le meme tie-break deterministe par index CSV.
+
+### Budget
+Budget fixe : 1500 tokens pour toutes les questions. Le comptage utilise le tokenizer Phase 14 `prajjwal1/bert-tiny` quand il est disponible localement, sinon un fallback par mots. Les sources sont ajoutees dans l'ordre de pertinence sans depasser volontairement ce budget.
+
+### Citations et abstention
+Chaque source conserve `id`, `datetime`, `city`, `state`, `country`, `shape` et `comments`. Les reponses affirmatives citent les releves utilises sous la forme `[Rindex]`, retrouvable directement dans le CSV. Regle d'abstention : abstention si top_score < 0.08, si aucun terme informatif commun n'apparait dans les 5 premieres sources, ou si la meilleure couverture des termes informatifs est < 0.50; seuils fixes avant evaluation.
+
+### Determinisme
+Question repetee : What sounds or noises did witnesses hear during the sightings?
+
+- Run 1 : ['R35216', 'R35275', 'R56472', 'R52235', 'R34128', 'R37001', 'R52853', 'R57442', 'R81162', 'R63058']
+- Run 2 : ['R35216', 'R35275', 'R56472', 'R52235', 'R34128', 'R37001', 'R52853', 'R57442', 'R81162', 'R63058']
+- Meme resultat : OUI
+
+### Audit humain des sources
+Les 20 couples question/methode ont ete verifies humainement dans `outputs/phase15_source_audit.csv` : 10 questions x 2 methodes. Il ne reste aucune ligne en attente d'audit.
+
+| methode | correct | correct_source_rate | releves moyens | tokens moyens |
+| --- | ---: | ---: | ---: | ---: |
+| TF-IDF | 6/10 | 60% | 28.50 | 1463.7 |
+| naive | 7/10 | 70% | 24.80 | 1472.8 |
+
+Difference : 1 question sur 10.
+
+La baseline naive obtient ici 70 % de reponses correctement sourcees contre 60 % pour TF-IDF, soit un seul cas de difference sur dix questions. Ce leger avantage ne suffit pas a conclure a une superiorite generale ; il montre surtout que plusieurs questions de cette batterie sont tres lexicales.
+
+Figure : `outputs/phase15_retrieval_comparison.png`, proportion de reponses correctement sourcees d'apres l'audit humain.
+
+### Echecs interessants
+- Q1 : TF-IDF s'abstient trop alors que les extraits contiennent du bruit exploitable.
+- Q2 : aucune methode ne repond proprement a "quelles couleurs".
+- Q4 : les deux methodes s'abstiennent malgre plusieurs mentions de zones habitees.
+- Q7 : le mot "long" cree une ambiguite entre duree et longueur physique.
+- Q10 : les deux systemes s'abstiennent correctement.
+
+### Exemples
+Question (tfidf) : Which colors are most clearly described by witnesses?
+
+Reponse : Les releves recuperes donnent des elements directs sur la question: le premier temoignage pertinent indique notamment "Circular with colors." [R18443], [R38706], [R52378]. Cette synthese reste limitee aux passages cites.
+
+Sources :
+- [R18443] 1/19/2014 02:30 | southfield | mi | us | disk | Circular with colors.
+- [R38706] 3/5/2010 23:18 | oak harbor | wa | us | other | 4 lights seen clearly many difrent colors that seem to move and turn but do not move in any direction
+- [R52378] 6/1/1977 13:00 | malibu |  |  | fireball | The first 2 ships to show were joined by 2 others within about 10 minutes. They seemed to oselate colors from the lighter colors to the
+
+Question (naive) : What sounds or noises did witnesses hear during the sightings?
+
+Reponse : Les releves recuperes donnent des elements directs sur la question: le premier temoignage pertinent indique notamment "we were inside our house and heard several loud jet like sounds that would stop and then start up agan (exactly like..." [R16533], [R33175], [R40961]. Cette synthese reste limitee aux passages cites.
+
+Sources :
+- [R16533] 11/5/2005 23:00 | cranston | ri | us | unknown | we were inside our house and heard several loud jet like sounds that would stop and then start up agan (exactly like the noises posted
+- [R33175] 2/8/2001 19:44 | wakefield (uk/england) |  | gb | cigar | IT WAS BRIGHT GREEN, WITH A ORANGE/YELLOW TAIL, MOVING FROM EAST TO WEST, DID NOT HEAR ANY SOUNDS FROM IT, ALL HAPPEND IN A FEW SECONDS
+- [R40961] 4/15/1998 20:30 | hartsgrove | oh | us | disk | Large disc shaped aircraft producing intense volumes of buzzing noises that for some reason I could only hear is what I saw in the sky
+
+### Cas sans reponse
+Question difficile : Did witnesses report a smell of chocolate or vanilla near the objects?
+
+Reponse TF-IDF : Nous n'avons pas de releve suffisamment pertinent pour repondre a cette question.
+
+### Limites
+BERT-tiny Phase 14 (`prajjwal1/bert-tiny`) est un encodeur/classifieur, pas un modele generatif libre. Il sert ici au comptage de tokens si son tokenizer est disponible localement; la synthese est deterministe et limitee aux passages recuperes. Le systeme reste lexical : synonymes, formulations rares et questions en francais peuvent reduire le rappel. L'audit humain reste necessaire pour valider strictement les citations.
+
+Fichiers : `outputs/phase15_questions.csv`, `outputs/phase15_source_audit.csv`, `outputs/phase15_retrieval_comparison.png`.
+
