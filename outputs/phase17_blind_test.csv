@@ -1,0 +1,11 @@
+﻿item_id,text,human_guess,true_label,correct
+BT01,"3 wings over river, so low that a bit of smoke to the south of your boat and your crew is making your boat and boat a little bit out of water.",REAL,FAKE,False
+BT02,"Coming out of mess hall&#44 I saw A circular&#44 sharp edged&#44 without other features object over the ocean&#44 in line with the runway at a SAC",FAKE,REAL,False
+BT03,"Triangle shape in the sky moving fast with rows of dim lights.",REAL,REAL,True
+BT04,"Three red lights formed triangle and faded away",REAL,REAL,True
+BT05,"In April 2007, I heard of a possible UFO sighting after seeing on a ""Sgt. Patrick"" series of UFO sightings from the Gulf Coast. This appeared to be",FAKE,FAKE,True
+BT06,"no planes flying over NY.",FAKE,FAKE,True
+BT07,"3 people in red space out there have been on the roof of a condo tower.",FAKE,FAKE,True
+BT08,"Small disk flyes over school in Apalachin&#44 NY",REAL,REAL,True
+BT09,"this one is great to see how this would work..",FAKE,FAKE,True
+BT10,"Definetly not a typical aircraft&#44 military or commercial jet of any kind",REAL,REAL,True

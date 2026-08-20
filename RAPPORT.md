@@ -580,3 +580,42 @@ Piste suivante qui aurait ete testee : distillation d'un petit modele si aucune 
 
 Fichiers : `outputs/phase16_optimization.csv`, `outputs/phase16_score_size.png`, `outputs/phase16_latency.png`.
 
+## Phase 17 — Le faux témoignage
+
+### Modele generatif
+Modele utilise : `distilgpt2` sur `cpu`. Ce choix est un modele causal GPT preentraine, raisonnable en taille (81912576 parametres), executable localement sur CPU et adapte a la generation de texte anglais. Le classifieur BERT-tiny des phases precedentes n'est pas utilise comme generateur car il n'est pas autoregressif.
+
+Tous les parametres ont ete places en `requires_grad=False`, le modele est en `eval()`, aucun optimizer, aucun `backward()`, aucun `train()` et aucun fine-tuning n'est execute. Empreinte avant : `17e8523789b82779f0ce60afd66935fd2e54f265ef8919f359b2367afb93f09f`. Empreinte apres : `17e8523789b82779f0ce60afd66935fd2e54f265ef8919f359b2367afb93f09f`. Parametres internes modifies : NON.
+
+### Etalon de style reel
+Echantillon deterministe de 300 vrais commentaires non vides tires de `comments` sur le dataset complet. Longueur en mots : mediane=14.0, p25=9.0, p75=21.0, moyenne=15.0. Proportion avec nombres=0.557, avec ponctuation=0.590, diversite lexicale moyenne=0.946. Cet echantillon sert seulement aux mesures et au prompt few-shot; il n'entraine pas le modele.
+
+### Grille de generation
+| setting | temperature | top_p | top_k | mean_words | median_words | repetition | diversity | degenerate_ratio | mean_time_s | duplicate_ratio |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| A_trop_deterministe | 0.2500 | 0.7000 | 20 | 16.2000 | 14.0000 | 0.2899 | 0.6414 | 0.4000 | 2.2649 | 0.0000 |
+| B_deterministe_intermediaire | 0.5500 | 0.8500 | 40 | 11.4000 | 12.0000 | 0.0000 | 0.9633 | 0.0000 | 2.3306 | 0.2000 |
+| C_compromis | 0.8000 | 0.9200 | 50 | 10.6000 | 10.0000 | 0.0000 | 1.0000 | 0.0000 | 2.3605 | 0.2000 |
+| D_creatif | 1.0500 | 0.9600 | 80 | 18.2000 | 16.0000 | 0.0129 | 0.9023 | 0.0000 | 2.3342 | 0.0000 |
+| E_trop_aleatoire | 1.5500 | 1.0000 | 0 | 27.4000 | 27.0000 | 0.0000 | 1.0000 | 0.4000 | 2.3661 | 0.0000 |
+
+Echec trop deterministe (`A_trop_deterministe`) : `The Tower is a small craft with a large craft with a large craft with a large craft with a large craft with a large craft with a large craft with a large craft`
+
+Echec trop aleatoire (`E_trop_aleatoire`) : `Earp practices o secret to law inn small whereas houses today have impersonators phantom ?? eurowall gas hockey competition sell way 2 crazy paieground mandello investing peanuts????????`
+
+### Reglage retenu
+Reglage compromis : `D_creatif`. Nous nous sommes arretes sur ce reglage car les mesures le placent entre la repetition des faibles temperatures et le chaos des temperatures hautes, puis l'inspection qualitative confirme qu'il reste proche de la longueur et du vocabulaire plat des vrais releves sans tourner en rond.
+
+Exemple final complet : `3 wings over river, so low that a bit of smoke to the south of your boat and your crew is making your boat and boat a little bit out of water.`
+
+### Test en aveugle
+Le test humain en aveugle a reellement ete effectue sur 10 items : 5 vrais temoignages et 5 faux temoignages produits par le reglage retenu. La personne juge ne connaissait pas la cle au moment de remplir `human_guess`; la cle `outputs/phase17_blind_test_key.csv` a ete utilisee ensuite uniquement pour l'evaluation.
+
+Resultat humain reel : 8/10 decisions correctes, accuracy=80.0 %. Details : REAL -> REAL = 4, REAL -> FAKE = 1, FAKE -> FAKE = 4, FAKE -> REAL = 1. Un faux temoignage sur 5 a donc ete pris pour un vrai; un vrai temoignage sur 5 a ete pris pour un faux.
+
+Interpretation : le resultat montre que le juge a majoritairement distingue les vrais des faux. Le generateur n'est donc pas demontre comme globalement convaincant sur ce petit test; l'element interessant est limite a 1 faux temoignage ayant trompe le juge. Aucun resultat humain n'est invente.
+
+Le modele generatif n'a subi aucun entrainement ni modification de parametres pour ce test. Les empreintes deja mesurees en Phase 17 restent identiques avant/apres : `17e8523789b82779f0ce60afd66935fd2e54f265ef8919f359b2367afb93f09f`.
+
+Fichiers : `outputs/phase17_generation_grid.csv`, `outputs/phase17_fake_reports.csv`, `outputs/phase17_blind_test.csv`, `outputs/phase17_blind_test_key.csv`.
+

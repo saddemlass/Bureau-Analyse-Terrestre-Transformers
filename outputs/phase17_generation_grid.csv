@@ -1,0 +1,26 @@
+setting,seed,temperature,top_p,top_k,text,generation_time_s,word_count,repeated_bigram_rate,repeated_trigram_rate,lexical_diversity,degenerate
+A_trop_deterministe,17017,0.25,0.7,20,1st - The Big Blue UFO in the sky.,2.515954100061208,8.0,0.0,0.0,0.875,0.0
+A_trop_deterministe,17018,0.25,0.7,20,The Tower is a small craft with a large craft with a large craft with a large craft with a large craft with a large craft with a large craft with a large craft,2.262539600022137,34.0,0.7272727272727273,0.71875,0.23529411764705882,1.0
+A_trop_deterministe,17019,0.25,0.7,20,"The tower is a huge, huge, huge, huge, huge, huge, huge, huge, huge, huge, huge, huge, huge, huge, huge,",2.160296999849379,19.0,0.7222222222222222,0.7058823529411764,0.2631578947368421,1.0
+A_trop_deterministe,17020,0.25,0.7,20,1st - The UFO in the sky.,2.17097539966926,6.0,0.0,0.0,0.8333333333333334,0.0
+A_trop_deterministe,17021,0.25,0.7,20,1st - Brassy Metalic Hockey Puck Disc with black port holes and honey comb underneath.,2.2148859999142587,14.0,0.0,0.0,1.0,0.0
+B_deterministe_intermediaire,17117,0.55,0.85,40,1st - Brassy Metalic Hockey Puck Disc with black port holes and honey comb underneath.,2.1334394002333283,14.0,0.0,0.0,1.0,0.0
+B_deterministe_intermediaire,17118,0.55,0.85,40,1st - Big Black Box with black port holes and honey comb underneath.,2.1506688999943435,12.0,0.0,0.0,0.9166666666666666,0.0
+B_deterministe_intermediaire,17119,0.55,0.85,40,The tower is about a mile from the North Pole.,2.1500464999116957,10.0,0.0,0.0,0.9,0.0
+B_deterministe_intermediaire,17120,0.55,0.85,40,1st - Brassy Metalic Hockey Puck Disc with black port holes and honey comb underneath.,2.44518329994753,14.0,0.0,0.0,1.0,0.0
+B_deterministe_intermediaire,17121,0.55,0.85,40,I have no idea what it is.,2.773777899798006,7.0,0.0,0.0,1.0,0.0
+C_compromis,17217,0.8,0.92,50,small craft flying from east of the U.S.,2.4516511997208,9.0,0.0,0.0,1.0,0.0
+C_compromis,17218,0.8,0.92,50,1st - Brassy Metalic Hockey Puck Disc with black port holes and honey comb underneath.,2.159138500224799,14.0,0.0,0.0,1.0,0.0
+C_compromis,17219,0.8,0.92,50,3rd - Dixie Lights in the sky at 4:30 PM,2.198486099950969,10.0,0.0,0.0,1.0,0.0
+C_compromis,17220,0.8,0.92,50,1st - Brassy Metalic Hockey Puck Disc with black port holes and honey comb underneath.,2.287098600063473,14.0,0.0,0.0,1.0,0.0
+C_compromis,17221,0.8,0.92,50,It was a beautiful little boat.,2.706361200194806,6.0,0.0,0.0,1.0,0.0
+D_creatif,17317,1.05,0.96,80,"3 wings over river, so low that a bit of smoke to the south of your boat and your crew is making your boat and boat a little bit out of water.",2.3125450001098216,32.0,0.06451612903225812,0.033333333333333326,0.71875,0.0
+D_creatif,17318,1.05,0.96,80,this one is great to see how this would work..,2.3506566998548806,10.0,0.0,0.0,0.9,0.0
+D_creatif,17319,1.05,0.96,80,"In April 2007, I heard of a possible UFO sighting after seeing on a ""Sgt. Patrick"" series of UFO sightings from the Gulf Coast. This appeared to be",2.2325530000962317,28.0,0.0,0.0,0.8928571428571429,0.0
+D_creatif,17320,1.05,0.96,80,no planes flying over NY.,2.254632900003344,5.0,0.0,0.0,1.0,0.0
+D_creatif,17321,1.05,0.96,80,3 people in red space out there have been on the roof of a condo tower.,2.5205958001315594,16.0,0.0,0.0,1.0,0.0
+E_trop_aleatoire,17417,1.55,1.0,0,Earp practices o secret to law inn small whereas houses today have impersonators phantom ?? eurowall gas hockey competition sell way 2 crazy paieground mandello investing peanuts????????,2.5740998997353017,26.0,0.0,0.0,1.0,1.0
+E_trop_aleatoire,17418,1.55,1.0,0,breath shots ruin neverliner mir14 ter Pere airliner flavour in dramatic style ^ Spider Indian horses link crane drum day flat LA hoop brace of faithful carrying evasive escorting him,2.5609309999272227,29.0,0.0,0.0,1.0,0.0
+E_trop_aleatoire,17419,1.55,1.0,0,$50 kind picture.. $150 mint narrated by growthtubaru outlandish af Miss America Paula picks twocopnt any guns especially your craft sporting high grad jew label grab pots,2.1692996001802385,27.0,0.0,0.0,1.0,0.0
+E_trop_aleatoire,17420,1.55,1.0,0,very Thunder spirit lords ghosts tsunami barrel!! carefully packing responsible baby tower Zombie herself017 bonazed haircutsizza same stain 4 year steanooga sisters angels wrath debt recognition front,2.1116733998060226,27.0,0.0,0.0,1.0,1.0
+E_trop_aleatoire,17421,1.55,1.0,0,"suppose Enghner hail approximately 25 better helicopters than yahoo in frequencies McGAs powered by MSM orbit, safer potential, into M668 buzzing apartments mission support ban module Gary Painter",2.4147064997814596,28.0,0.0,0.0,1.0,0.0

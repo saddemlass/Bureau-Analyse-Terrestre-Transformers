@@ -56,6 +56,7 @@ from pretrained import (
 )
 from retrieval import run_phase15
 from optimization import PHASE16_MAX_MACRO_F1_DROP, run_phase16
+from generation import print_phase17, run_phase17
 
 
 DATA_URLS = [
@@ -2383,7 +2384,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Bureau d'analyse terrestre")
     parser.add_argument(
         "--phase",
-        choices=["6", "7", "8", "9", "10", "11", "10-11", "12", "13", "12-13", "14", "15", "16"],
+        choices=["6", "7", "8", "9", "10", "11", "10-11", "12", "13", "12-13", "14", "15", "16", "17"],
         help="executer rapidement une phase ciblee",
     )
     return parser.parse_args()
@@ -2419,6 +2420,12 @@ def main() -> None:
         phase15 = run_phase15(raw_df, OUTPUT_DIR)
         append_report_phase15(phase15)
         print_phase15(phase15)
+        print(f"\nPhase demandee terminee: {args.phase}")
+        return
+
+    if args.phase == "17":
+        phase17 = run_phase17(raw_df, OUTPUT_DIR)
+        print_phase17(phase17)
         print(f"\nPhase demandee terminee: {args.phase}")
         return
 
